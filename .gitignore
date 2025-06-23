@@ -25,6 +25,7 @@ build/
 ios/Pods/
 ios/Flutter/Flutter.framework
 ios/Flutter/App.framework
+ios/
 # Android
 android/.gradle/
 android/app/build/
