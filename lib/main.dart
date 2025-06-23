@@ -745,6 +745,7 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
       _resources = [];
     });
     await Future.delayed(const Duration(seconds: 1)); // Simulate network delay
+    if (!mounted) return; // <-- Add this line
 
     // Example: You can expand this with real data or API integration
     final Map<String, List<String>> resourceData = {
