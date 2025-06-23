@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
-import 'package:android_intent_plus/flag.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Add this import
 
 void main() {
@@ -241,6 +240,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     final prefs = await SharedPreferences.getInstance();
     final shown = prefs.getBool('permissions_shown') ?? false;
     if (!shown) {
+      if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         showPermissionsDialog(context);
       });
