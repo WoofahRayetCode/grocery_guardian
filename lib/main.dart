@@ -55,7 +55,6 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     final name = _itemController.text.trim();
     final tag = _tagController.text.trim();
 
-    // Check for common allergy
     final commonReactions = FoodReactionDatabase.getReactionsForFood(name);
 
     if (commonReactions.isNotEmpty) {
@@ -92,6 +91,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ],
         ),
       );
+      if (!mounted) return; // <-- Add this line
 
       if (confirmed != true) {
         // Recommend alternatives if available
@@ -168,6 +168,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             },
           );
         }
+        if (!mounted) return; // <-- Add this line
         return;
       }
     }
