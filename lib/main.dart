@@ -257,66 +257,126 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline),
-            tooltip: 'Allergy Info',
+            tooltip: 'More Info',
             onPressed: () {
-              Navigator.pushNamed(context, '/allergyInfo');
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Uncheck All',
-            onPressed: _uncheckAll,
-          ),
-          IconButton(
-            icon: const Icon(Icons.volunteer_activism),
-            tooltip: 'Low Income Resources',
-            onPressed: () {
-              Navigator.pushNamed(context, '/resources');
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.code),
-            tooltip: "Developer's GitHub",
-            onPressed: () async {
-              final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian');
-              // Try common browsers first
-              const browsers = [
-                'app.vanadium.browser',
-                'com.android.chrome',
-                'org.mozilla.firefox',
-                'com.opera.browser',
-                'com.brave.browser',
-                'com.microsoft.emmx',
-              ];
-              bool launched = false;
-              for (final pkg in browsers) {
-                final intent = AndroidIntent(
-                  action: 'action_view',
-                  data: uri.toString(),
-                  package: pkg,
-                );
-                try {
-                  await intent.launch();
-                  launched = true;
-                  break;
-                } catch (_) {}
-              }
-              if (!launched) {
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not open GitHub link.')),
-                  );
-                }
-              }
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.privacy_tip),
-            tooltip: 'View App Permissions',
-            onPressed: () {
-              showPermissionsDialog(context);
+              showDialog(
+                context: context,
+                builder: (context) => SimpleDialog(
+                  title: const Text('More Info & Links'),
+                  children: [
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/allergyInfo');
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.info_outline),
+                        title: Text('Allergy Info'),
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/resources');
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.location_city),
+                        title: Text('Find Low Income Resources'),
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        final uri = Uri.parse('https://www.paypal.com/donate/?business=WZACHCSCA5SMS&no_recurring=0&currency_code=USD');
+                        const browsers = [
+                          'app.vanadium.browser',
+                          'com.android.chrome',
+                          'org.mozilla.firefox',
+                          'com.opera.browser',
+                          'com.brave.browser',
+                          'com.microsoft.emmx',
+                        ];
+                        bool launched = false;
+                        for (final pkg in browsers) {
+                          final intent = AndroidIntent(
+                            action: 'action_view',
+                            data: uri.toString(),
+                            package: pkg,
+                          );
+                          try {
+                            await intent.launch();
+                            launched = true;
+                            break;
+                          } catch (_) {}
+                        }
+                        if (!launched) {
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Could not open PayPal link.')),
+                            );
+                          }
+                        }
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.volunteer_activism),
+                        title: Text('Donate (PayPal)'),
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian');
+                        const browsers = [
+                          'app.vanadium.browser',
+                          'com.android.chrome',
+                          'org.mozilla.firefox',
+                          'com.opera.browser',
+                          'com.brave.browser',
+                          'com.microsoft.emmx',
+                        ];
+                        bool launched = false;
+                        for (final pkg in browsers) {
+                          final intent = AndroidIntent(
+                            action: 'action_view',
+                            data: uri.toString(),
+                            package: pkg,
+                          );
+                          try {
+                            await intent.launch();
+                            launched = true;
+                            break;
+                          } catch (_) {}
+                        }
+                        if (!launched) {
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Could not open GitHub link.')),
+                            );
+                          }
+                        }
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.code),
+                        title: Text("Developer's GitHub"),
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        showPermissionsDialog(context);
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.privacy_tip),
+                        title: Text('View App Permissions'),
+                      ),
+                    ),
+                  ],
+                ),
+              );
             },
           ),
         ],
@@ -350,7 +410,22 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            // Add the Uncheck All button here:
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Uncheck All'),
+                onPressed: _uncheckAll,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueGrey[50],
+                  foregroundColor: Colors.black87,
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Expanded(
               child: Row(
                 children: [
