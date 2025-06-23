@@ -278,7 +278,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             icon: const Icon(Icons.code),
             tooltip: "Developer's GitHub",
             onPressed: () async {
-              final uri = Uri.parse('https://github.com/WoofahRayetCode');
+              final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian');
               // Try common browsers first
               const browsers = [
                 'app.vanadium.browser',
