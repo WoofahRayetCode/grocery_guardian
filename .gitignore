@@ -1,0 +1,35 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# Flutter/Dart/Pub related
+.dart_tool/
+.packages
+build/
+.pub/
+# IDEs
+.idea/
+.vscode/
+*.iml
+# iOS
+ios/Pods/
+ios/Flutter/Flutter.framework
+ios/Flutter/App.framework
+# Android
+android/.gradle/
+android/app/build/
+
+# Exclude any JDK/JRE folders
+**/lib/Oracle_JDK-*/
+**/jdk*/
+**/jre*/
