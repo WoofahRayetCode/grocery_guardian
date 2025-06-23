@@ -588,6 +588,7 @@ class _GroceryItem {
   final String name;
   final String tag;
   bool checked;
+
   _GroceryItem({required this.name, required this.tag, this.checked = false});
 }
 
