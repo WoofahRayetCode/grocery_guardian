@@ -454,11 +454,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                       onPressed: () async {
                         Navigator.pop(context);
                         final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian');
-                        if (await canLaunchUrl(uri)) {
+                        try {
+                          // Try to launch without canLaunchUrl for reliability
                           await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        } else {
+                        } catch (e) {
+                          // Show error with details
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Could not open GitHub link.')),
+                            SnackBar(content: Text('Could not open GitHub Releases. Error: ${e.toString()}')),
                           );
                         }
                       },
@@ -1287,11 +1289,13 @@ class _UpdateScreenState extends State<UpdateScreen> {
               label: const Text('View Releases on GitHub'),
               onPressed: () async {
                 final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian/releases');
-                if (await canLaunchUrl(uri)) {
+                try {
+                  // Try to launch without canLaunchUrl for reliability
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else {
+                } catch (e) {
+                  // Show error with details
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not open GitHub Releases.')),
+                    SnackBar(content: Text('Could not open GitHub Releases. Error: ${e.toString()}')),
                   );
                 }
               },
