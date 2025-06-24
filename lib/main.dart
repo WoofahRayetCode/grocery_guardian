@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart'; // Add this import at the top if not present
+import 'package:package_info_plus/package_info_plus.dart'; // Add this import at the top
 
 void main() {
   runApp(const MainApp());
@@ -1217,6 +1218,20 @@ class _UpdateScreenState extends State<UpdateScreen> {
   String? _releaseNotes;
   String? _apkUrl;
   String? _error;
+  String? _appVersion; // Add this field
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    setState(() {
+      _appVersion = info.version;
+    });
+  }
 
   Future<void> _checkForUpdate() async {
     setState(() {
@@ -1283,6 +1298,14 @@ class _UpdateScreenState extends State<UpdateScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_appVersion != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: Text(
+                  'Current App Version: $_appVersion',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
             ElevatedButton.icon(
               icon: const Icon(Icons.system_update),
               label: const Text('Check for Updates'),
@@ -1292,7 +1315,7 @@ class _UpdateScreenState extends State<UpdateScreen> {
             ElevatedButton.icon(
               icon: const Icon(Icons.download),
               label: const Text('Force Download Current APK'),
-              onPressed: _loading ? null : _forceDownloadApk,
+              onPressed: (_loading || _apkUrl == null) ? null : _forceDownloadApk, // Disabled if no APK
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
