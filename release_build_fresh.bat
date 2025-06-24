@@ -26,5 +26,8 @@ cmd /c flutter pub get
 echo Building release APK...
 cmd /c flutter build apk --release
 
+echo Installing APK on connected device...
+cmd /c flutter install
+
 echo Done!
 pause
