@@ -1346,3 +1346,60 @@ class _UpdateScreenState extends State<UpdateScreen> {
     );
   }
 }
+
+const String appBuildTime = '2024-06-23T12:00:00Z'; // Update this for each build
+final DateTime appBuildDateTime = DateTime.parse(appBuildTime);
+
+Future<DateTime?> fetchLatestReleaseTime() async {
+  final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
+  final response = await http.get(Uri.parse(url));
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body);
+    return DateTime.parse(data['published_at']);
+  }
+  return null;
+}
+
+Future<void> checkForTimeBasedUpdate(BuildContext context) async {
+  final latestReleaseTime = await fetchLatestReleaseTime();
+  if (latestReleaseTime == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not check for updates.')),
+    );
+    return;
+  }
+
+  if (latestReleaseTime.isAfter(appBuildDateTime)) {
+    // Show update available dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Update Available'),
+        content: Text(
+          'A new version was released on ${latestReleaseTime.toLocal()}.\nWould you like to update?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final url = 'https://github.com/WoofahRayetCode/grocery_guardian/releases/latest';
+              final uri = Uri.parse(url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('App is up to date.')),
+    );
+  }
+}
