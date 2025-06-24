@@ -1216,7 +1216,6 @@ class _UpdateScreenState extends State<UpdateScreen> {
   String? _latestTag;
   String? _releaseNotes;
   String? _apkUrl;
-  String? _releaseUrl;
   String? _error;
 
   Future<void> _checkForUpdate() async {
@@ -1226,7 +1225,6 @@ class _UpdateScreenState extends State<UpdateScreen> {
       _latestTag = null;
       _releaseNotes = null;
       _apkUrl = null;
-      _releaseUrl = null;
     });
     final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
     try {
@@ -1236,7 +1234,6 @@ class _UpdateScreenState extends State<UpdateScreen> {
         setState(() {
           _latestTag = data['tag_name'] ?? 'Unknown';
           _releaseNotes = data['body'] ?? 'No release notes.';
-          _releaseUrl = data['html_url'];
           final assets = data['assets'] as List<dynamic>? ?? [];
           final apkAsset = assets.firstWhere(
             (a) => (a['name'] as String?)?.endsWith('.apk') ?? false,
