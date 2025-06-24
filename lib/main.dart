@@ -1,29 +1,93 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Add this import
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MainApp());
 }
 
-class MainApp extends StatelessWidget {
+class MainApp extends StatefulWidget {
   const MainApp({super.key});
+
+  @override
+  State<MainApp> createState() => _MainAppState();
+}
+
+class _MainAppState extends State<MainApp> {
+  ThemeMode _themeMode = ThemeMode.system;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTheme();
+  }
+
+  Future<void> _loadTheme() async {
+    final prefs = await SharedPreferences.getInstance();
+    final themeString = prefs.getString('themeMode') ?? 'system';
+    setState(() {
+      switch (themeString) {
+        case 'light':
+          _themeMode = ThemeMode.light;
+          break;
+        case 'dark':
+          _themeMode = ThemeMode.dark;
+          break;
+        default:
+          _themeMode = ThemeMode.system;
+      }
+    });
+  }
+
+  Future<void> _setTheme(ThemeMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _themeMode = mode;
+    });
+    await prefs.setString('themeMode', mode.name);
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: const GroceryListScreen(),
+      theme: ThemeData.light(),
+      darkTheme: ThemeData.dark(),
+      themeMode: _themeMode,
+      home: GroceryListScreen(
+        onThemeChanged: _setTheme,
+        currentThemeMode: _themeMode,
+      ),
       routes: {
         '/allergyInfo': (context) => const AllergyInfoScreen(),
-        '/resources': (context) => const LowIncomeResourcesScreen(), // <-- Add this line
+        '/resources': (context) => const LowIncomeResourcesScreen(),
       },
     );
   }
 }
 
+// Add this helper map to associate foods with icons (place near your other data/maps):
+final Map<String, IconData> foodIcons = {
+  'Milk': Icons.local_drink,
+  'Eggs': Icons.egg,
+  'Peanuts': Icons.spa,
+  'Tree nuts': Icons.nature,
+  'Wheat': Icons.grain,
+  'Soy': Icons.spa,
+  'Fish': Icons.set_meal,
+  'Shellfish': Icons.set_meal,
+  'Strawberries': Icons.local_florist,
+  'Tomatoes': Icons.local_florist,
+  'Sesame': Icons.spa,
+  // Add more as needed
+};
+
+// Update GroceryListScreen to accept theme controls
 class GroceryListScreen extends StatefulWidget {
-  const GroceryListScreen({super.key});
+  final void Function(ThemeMode)? onThemeChanged;
+  final ThemeMode? currentThemeMode;
+
+  const GroceryListScreen({super.key, this.onThemeChanged, this.currentThemeMode});
 
   @override
   State<GroceryListScreen> createState() => _GroceryListScreenState();
@@ -237,17 +301,40 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     _showPermissionsOnFirstLaunch();
   }
 
-  Future<void> _showPermissionsOnFirstLaunch() async {
-    final prefs = await SharedPreferences.getInstance();
-    final shown = prefs.getBool('permissions_shown') ?? false;
-    if (!shown) {
-      if (!mounted) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        showPermissionsDialog(context);
-      });
-      await prefs.setBool('permissions_shown', true);
-    }
+  // Add this widget for the permissions info dialog:
+  void showPermissionsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('App Permissions & Privacy'),
+        content: const Text(
+          'This app does not collect or share your personal data.\n\n'
+          'Permissions used:\n'
+          '- Internet: To open external links for allergy info and resources.\n'
+          '- No location, contacts, or storage access is requested.\n\n'
+          'We respect your privacy.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
+  
+    Future<void> _showPermissionsOnFirstLaunch() async {
+      final prefs = await SharedPreferences.getInstance();
+      final shown = prefs.getBool('permissions_shown') ?? false;
+      if (!shown) {
+        if (!mounted) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          showPermissionsDialog(context);
+        });
+        await prefs.setBool('permissions_shown', true);
+      }
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -255,6 +342,31 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       appBar: AppBar(
         title: const Text('Grocery List'),
         actions: [
+          // Theme toggle button
+          PopupMenuButton<ThemeMode>(
+            icon: const Icon(Icons.dark_mode),
+            tooltip: 'Theme',
+            onSelected: (mode) {
+              widget.onThemeChanged?.call(mode);
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem(
+                value: ThemeMode.system,
+                checked: widget.currentThemeMode == ThemeMode.system,
+                child: const Text('System'),
+              ),
+              CheckedPopupMenuItem(
+                value: ThemeMode.light,
+                checked: widget.currentThemeMode == ThemeMode.light,
+                child: const Text('Light'),
+              ),
+              CheckedPopupMenuItem(
+                value: ThemeMode.dark,
+                checked: widget.currentThemeMode == ThemeMode.dark,
+                child: const Text('Dark'),
+              ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline),
             tooltip: 'More Info',
@@ -310,9 +422,11 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                           } catch (_) {}
                         }
                         if (!launched) {
+                          if (!mounted) return; // <-- Add this line
                           if (await canLaunchUrl(uri)) {
                             await launchUrl(uri, mode: LaunchMode.externalApplication);
                           } else {
+                            if (!mounted) return; // <-- Add this line
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Could not open PayPal link.')),
                             );
@@ -350,9 +464,11 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                           } catch (_) {}
                         }
                         if (!launched) {
+                          if (!mounted) return; // Guard State.context use
                           if (await canLaunchUrl(uri)) {
                             await launchUrl(uri, mode: LaunchMode.externalApplication);
                           } else {
+                            if (!mounted) return; // Guard State.context use
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Could not open GitHub link.')),
                             );
@@ -419,8 +535,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 label: const Text('Uncheck All'),
                 onPressed: _uncheckAll,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueGrey[50],
-                  foregroundColor: Colors.black87,
+                  backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
                   elevation: 0,
                 ),
               ),
@@ -664,7 +780,7 @@ class _GroceryItem {
   final String tag;
   bool checked;
 
-  _GroceryItem({required this.name, required this.tag, this.checked = false});
+  _GroceryItem({required this.name, required this.tag}) : checked = false;
 }
 
 class FoodReactionDatabase {
@@ -914,42 +1030,7 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
                     ..._resources.map((r) => Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4.0),
                           child: InkWell(
-                            onTap: () async {
-                              final uri = Uri.tryParse(r.split(' ').last);
-                              if (uri != null && uri.isAbsolute) {
-                                // Try common browsers first
-                                const browsers = [
-                                  'app.vanadium.browser',
-                                  'com.android.chrome',
-                                  'org.mozilla.firefox',
-                                  'com.opera.browser',
-                                  'com.brave.browser',
-                                  'com.microsoft.emmx',
-                                ];
-                                bool launched = false;
-                                for (final pkg in browsers) {
-                                  final intent = AndroidIntent(
-                                    action: 'action_view',
-                                    data: uri.toString(),
-                                    package: pkg,
-                                  );
-                                  try {
-                                    await intent.launch();
-                                    launched = true;
-                                    break;
-                                  } catch (_) {}
-                                }
-                                if (!launched) {
-                                  if (await canLaunchUrl(uri)) {
-                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Could not open link.')),
-                                    );
-                                  }
-                                }
-                              }
-                            },
+                            onTap: () => _handleResourceTap(r.split(' ').last),
                             child: Text(
                               r,
                               style: TextStyle(
@@ -968,43 +1049,45 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
       ),
     );
   }
-}
 
-// Add this helper map to associate foods with icons (place near your other data/maps):
-final Map<String, IconData> foodIcons = {
-  'Milk': Icons.local_drink,
-  'Eggs': Icons.egg,
-  'Peanuts': Icons.spa,
-  'Tree nuts': Icons.nature,
-  'Wheat': Icons.grain,
-  'Soy': Icons.spa,
-  'Fish': Icons.set_meal,
-  'Shellfish': Icons.set_meal,
-  'Strawberries': Icons.local_florist,
-  'Tomatoes': Icons.local_florist,
-  'Sesame': Icons.spa,
-  // Add more as needed
-};
+  // Helper to handle resource link taps
+  Future<void> _handleResourceTap(String url) async {
+    if (url.startsWith('http')) {
+      final uri = Uri.parse(url);
+      // Try launching in common browsers first (Android)
+      const browsers = [
+        'app.vanadium.browser',
+        'com.android.chrome',
+        'org.mozilla.firefox',
+        'com.opera.browser',
+        'com.brave.browser',
+        'com.microsoft.emmx',
+      ];
+      bool launched = false;
+      for (final pkg in browsers) {
+        final intent = AndroidIntent(
+          action: 'action_view',
+          data: uri.toString(),
+          package: pkg,
+        );
+        try {
+          await intent.launch();
+          launched = true;
+          break;
+        } catch (_) {}
+      }
+      if (!launched) {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open link.')),
+          );
+        }
+      }
+    }
+  }
 
-// Add this widget for the permissions info dialog:
-void showPermissionsDialog(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('App Permissions & Privacy'),
-      content: const Text(
-        'This app does not collect or share your personal data.\n\n'
-        'Permissions used:\n'
-        '- Internet: To open external links for allergy info and resources.\n'
-        '- No location, contacts, or storage access is requested.\n\n'
-        'We respect your privacy.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('OK'),
-        ),
-      ],
-    ),
-  );
+// (showPermissionsDialog moved above to avoid "used before declared" error)
 }
