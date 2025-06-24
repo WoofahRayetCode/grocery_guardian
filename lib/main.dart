@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
@@ -773,6 +775,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         return ['No more specific alternatives found.'];
     }
   }
+
 }
 
 class _GroceryItem {
