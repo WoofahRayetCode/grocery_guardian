@@ -1,9 +1,12 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart'; // Add this import at the top if not present
 
 void main() {
   runApp(const MainApp());
@@ -497,6 +500,11 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
               );
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.system_update),
+            tooltip: 'Check for Updates',
+            onPressed: () => checkForGithubReleasesUpdate(context),
+          ),
         ],
       ),
       body: Padding(
@@ -776,6 +784,59 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     }
   }
 
+  Future<void> checkForGithubReleasesUpdate(BuildContext context) async {
+  final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
+  try {
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final tagName = data['tag_name'] ?? 'Unknown';
+      final htmlUrl = data['html_url'];
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Update Available'),
+          content: Text('A new release is available: $tagName\nWould you like to view or download it?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Later'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                final uri = Uri.parse(htmlUrl);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else {
+                  if (kDebugMode) debugPrint('Could not open release link: $htmlUrl');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Could not open release link.')),
+                  );
+                }
+              },
+              child: const Text('View/Download'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      if (kDebugMode) {
+        print('Failed to check for updates: ${response.statusCode}');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to check for updates: ${response.statusCode}')),
+      );
+    }
+  } catch (e) {
+    if (kDebugMode) {
+      print('Error checking for updates: $e');
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error checking for updates: $e')),
+    );
+  }
+}
 }
 
 class _GroceryItem {
@@ -1057,7 +1118,6 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
   Future<void> _handleResourceTap(String url) async {
     if (url.startsWith('http')) {
       final uri = Uri.parse(url);
-      // Try launching in common browsers first (Android)
       const browsers = [
         'app.vanadium.browser',
         'com.android.chrome',
@@ -1077,20 +1137,29 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
           await intent.launch();
           launched = true;
           break;
-        } catch (_) {}
+        } catch (e) {
+          if (kDebugMode) debugPrint('Browser launch error ($pkg): $e');
+        }
       }
       if (!launched) {
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
+        try {
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } else {
+            if (!mounted) return;
+            if (kDebugMode) debugPrint('Could not open link: $url');
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not open link.')),
+            );
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('Error launching url: $e');
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open link.')),
+            SnackBar(content: Text('Error launching url: $e')),
           );
         }
       }
     }
   }
-
-// (showPermissionsDialog moved above to avoid "used before declared" error)
 }
