@@ -17,6 +17,9 @@ migrate_working_dir/
 .packages
 build/
 .pub/
+.metadata
+.flutter-plugins-dependencies
+pubspec.lock
 # IDEs
 .idea/
 .vscode/
@@ -29,8 +32,18 @@ ios/
 # Android
 android/.gradle/
 android/app/build/
+android/.kotlin/
 
 # Exclude any JDK/JRE folders
 **/lib/Oracle_JDK-*/
 **/jdk/>
 **/jre/>
+
+# Optional/Editor/OS/Temp files
+.env
+*.tmp
+*.bak
+*.orig
+Thumbs.db
+*.sublime-workspace
+*.sublime-project
