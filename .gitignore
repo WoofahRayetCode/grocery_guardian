@@ -32,7 +32,5 @@ android/app/build/
 
 # Exclude any JDK/JRE folders
 **/lib/Oracle_JDK-*/
-**/jdk*/
-**/jre*/
-
-.fake
+**/jdk/>
+**/jre/>
