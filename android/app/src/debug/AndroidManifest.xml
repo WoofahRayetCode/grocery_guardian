@@ -2,8 +2,8 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Grocery Guardian (Debug)"
-        tools:replace="android:label">
-        <!-- You can add debug-specific activities or meta-data here -->
+    android:label="Grocery Guardian"
+    android:icon="@mipmap/ic_launcher">
+    <!-- ... -->
     </application>
 </manifest>
