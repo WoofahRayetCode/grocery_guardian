@@ -1275,22 +1275,6 @@ class _UpdateScreenState extends State<UpdateScreen> {
     }
   }
 
-  Future<void> _forceDownloadApk() async {
-    if (_apkUrl == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No APK found in this release.')),
-      );
-      return;
-    }
-    final uri = Uri.parse(_apkUrl!);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not download APK.')),
-      );
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1431,7 +1415,7 @@ Future<void> downloadAndInstallApk(BuildContext context, String apkUrl) async {
     await file.writeAsBytes(response.bodyBytes);
 
     // Prompt install
-    await InstallPlugin.installApk(filePath, 'com.your.package.name'); // <-- Replace with your package name
+    await InstallPlugin.installApk(filePath, androidPackageName: 'com.WoofahRayetCode.GroceryGuardian');
   } catch (e) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Failed to download or install APK: $e')),
