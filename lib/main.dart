@@ -66,6 +66,7 @@ class _MainAppState extends State<MainApp> {
       routes: {
         '/allergyInfo': (context) => const AllergyInfoScreen(),
         '/resources': (context) => const LowIncomeResourcesScreen(),
+        '/update': (context) => const UpdateScreen(), // Add this line
       },
     );
   }
@@ -343,6 +344,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final allChecked = _mainItems.isNotEmpty && _mainItems.every((item) => item.checked);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Grocery List'),
@@ -503,7 +506,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           IconButton(
             icon: const Icon(Icons.system_update),
             tooltip: 'Check for Updates',
-            onPressed: () => checkForGithubReleasesUpdate(context),
+            onPressed: () => Navigator.pushNamed(context, '/update'),
           ),
         ],
       ),
@@ -535,21 +538,6 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                   onPressed: _addItem,
                 ),
               ],
-            ),
-            const SizedBox(height: 8),
-            // Add the Uncheck All button here:
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Uncheck All'),
-                onPressed: _uncheckAll,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-                  foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
-                  elevation: 0,
-                ),
-              ),
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -746,6 +734,37 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ],
         ),
       ),
+      // Add this floatingActionButton for the Completed button at the bottom right
+      floatingActionButton: allChecked
+          ? FloatingActionButton.extended(
+              icon: const Icon(Icons.check_circle),
+              label: const Text('Completed'),
+              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+              foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Clear List?'),
+                    content: const Text('Are you sure you want to remove all completed items from your list?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Yes, clear list'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  _uncheckAll();
+                }
+              },
+            )
+          : null,
     );
   }
 
@@ -796,7 +815,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Update Available'),
-          content: Text('A new release is available: $tagName\nWould you like to view or download it?'),
+          content: Text('A new release is available: $tagName\nWould you like to view or download it?\n\nYou can also force download the current version.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -809,7 +828,6 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 } else {
-                  if (kDebugMode) debugPrint('Could not open release link: $htmlUrl');
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Could not open release link.')),
                   );
@@ -817,21 +835,42 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
               },
               child: const Text('View/Download'),
             ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                // Force download the current APK asset from the latest release
+                final assets = data['assets'] as List<dynamic>? ?? [];
+                final apkAsset = assets.firstWhere(
+                  (a) => (a['name'] as String?)?.endsWith('.apk') ?? false,
+                  orElse: () => null,
+                );
+                if (apkAsset != null) {
+                  final apkUrl = apkAsset['browser_download_url'];
+                  final uri = Uri.parse(apkUrl);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Could not download APK.')),
+                    );
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No APK found in this release.')),
+                  );
+                }
+              },
+              child: const Text('Force Download APK'),
+            ),
           ],
         ),
       );
     } else {
-      if (kDebugMode) {
-        print('Failed to check for updates: ${response.statusCode}');
-      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to check for updates: ${response.statusCode}')),
       );
     }
   } catch (e) {
-    if (kDebugMode) {
-      print('Error checking for updates: $e');
-    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Error checking for updates: $e')),
     );
@@ -1161,5 +1200,129 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
         }
       }
     }
+  }
+}
+
+// New screen for app updates
+class UpdateScreen extends StatefulWidget {
+  const UpdateScreen({super.key});
+
+  @override
+  State<UpdateScreen> createState() => _UpdateScreenState();
+}
+
+class _UpdateScreenState extends State<UpdateScreen> {
+  bool _loading = false;
+  String? _latestTag;
+  String? _releaseNotes;
+  String? _apkUrl;
+  String? _releaseUrl;
+  String? _error;
+
+  Future<void> _checkForUpdate() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _latestTag = null;
+      _releaseNotes = null;
+      _apkUrl = null;
+      _releaseUrl = null;
+    });
+    final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _latestTag = data['tag_name'] ?? 'Unknown';
+          _releaseNotes = data['body'] ?? 'No release notes.';
+          _releaseUrl = data['html_url'];
+          final assets = data['assets'] as List<dynamic>? ?? [];
+          final apkAsset = assets.firstWhere(
+            (a) => (a['name'] as String?)?.endsWith('.apk') ?? false,
+            orElse: () => null,
+          );
+          _apkUrl = apkAsset != null ? apkAsset['browser_download_url'] : null;
+        });
+      } else {
+        setState(() {
+          _error = 'Failed to check for updates: ${response.statusCode}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Error checking for updates: $e';
+      });
+    } finally {
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _forceDownloadApk() async {
+    if (_apkUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No APK found in this release.')),
+      );
+      return;
+    }
+    final uri = Uri.parse(_apkUrl!);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not download APK.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('App Update')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ElevatedButton.icon(
+              icon: const Icon(Icons.system_update),
+              label: const Text('Check for Updates'),
+              onPressed: _loading ? null : _checkForUpdate,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.download),
+              label: const Text('Force Download Current APK'),
+              onPressed: _loading ? null : _forceDownloadApk,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('View Releases on GitHub'),
+              onPressed: () async {
+                final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian/releases');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+            ),
+            const SizedBox(height: 24),
+            if (_loading) const Center(child: CircularProgressIndicator()),
+            if (_error != null)
+              Text(_error!, style: const TextStyle(color: Colors.red)),
+            if (_latestTag != null)
+              Text('Latest Release: $_latestTag', style: const TextStyle(fontWeight: FontWeight.bold)),
+            if (_releaseNotes != null)
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Text(_releaseNotes!),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
