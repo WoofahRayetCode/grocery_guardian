@@ -18,6 +18,9 @@ jobs:
         with:
           flutter-version: '3.32.4'
 
+      - name: Clean build folder
+        run: flutter clean
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -26,3 +29,12 @@ jobs:
 
       - name: Run tests
         run: flutter test
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
