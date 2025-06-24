@@ -1415,7 +1415,7 @@ Future<void> downloadAndInstallApk(BuildContext context, String apkUrl) async {
     await file.writeAsBytes(response.bodyBytes);
 
     // Prompt install
-    await InstallPlugin.installApk(filePath, androidPackageName: 'com.WoofahRayetCode.GroceryGuardian');
+    await InstallPlugin.installApk(filePath);
   } catch (e) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Failed to download or install APK: $e')),
