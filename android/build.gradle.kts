@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application") version "7.3.0" apply false
-    kotlin("android") version "1.8.20"
 }
 
 allprojects {
@@ -17,6 +16,7 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
@@ -25,3 +25,6 @@ tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
 
+plugins {
+    id("com.android.application") version "7.3.0" apply false
+}
