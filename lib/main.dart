@@ -8,7 +8,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart'; // Add this import at the top if not present
 import 'package:package_info_plus/package_info_plus.dart'; // Add this import at the top
-import 'package:install_plugin/install_plugin.dart';
+import 'package:apk_installer/apk_installer.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
@@ -70,7 +70,7 @@ class _MainAppState extends State<MainApp> {
       routes: {
         '/allergyInfo': (context) => const AllergyInfoScreen(),
         '/resources': (context) => const LowIncomeResourcesScreen(),
-        '/update': (context) => const UpdateScreen(), // Add this line
+        '/update': (context) => const UpdateScreen(),
       },
     );
   }
@@ -454,37 +454,12 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                       onPressed: () async {
                         Navigator.pop(context);
                         final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian');
-                        const browsers = [
-                          'app.vanadium.browser',
-                          'com.android.chrome',
-                          'org.mozilla.firefox',
-                          'com.opera.browser',
-                          'com.brave.browser',
-                          'com.microsoft.emmx',
-                        ];
-                        bool launched = false;
-                        for (final pkg in browsers) {
-                          final intent = AndroidIntent(
-                            action: 'action_view',
-                            data: uri.toString(),
-                            package: pkg,
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Could not open GitHub link.')),
                           );
-                          try {
-                            await intent.launch();
-                            launched = true;
-                            break;
-                          } catch (_) {}
-                        }
-                        if (!launched) {
-                          if (!mounted) return; // Guard State.context use
-                          if (await canLaunchUrl(uri)) {
-                            await launchUrl(uri, mode: LaunchMode.externalApplication);
-                          } else {
-                            if (!mounted) return; // Guard State.context use
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Could not open GitHub link.')),
-                            );
-                          }
                         }
                       },
                       child: const ListTile(
@@ -1314,6 +1289,10 @@ class _UpdateScreenState extends State<UpdateScreen> {
                 final uri = Uri.parse('https://github.com/WoofahRayetCode/grocery_guardian/releases');
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Could not open GitHub Releases.')),
+                  );
                 }
               },
             ),
@@ -1414,8 +1393,8 @@ Future<void> downloadAndInstallApk(BuildContext context, String apkUrl) async {
     final file = File(filePath);
     await file.writeAsBytes(response.bodyBytes);
 
-    // Prompt install
-    await InstallPlugin.installApk(filePath);
+    // Prompt install using apk_installer
+    await ApkInstaller.installApk(filePath: filePath);
   } catch (e) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Failed to download or install APK: $e')),
