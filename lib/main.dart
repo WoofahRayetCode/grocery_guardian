@@ -8,6 +8,9 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart'; // Add this import at the top if not present
 import 'package:package_info_plus/package_info_plus.dart'; // Add this import at the top
+import 'package:install_plugin/install_plugin.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
 void main() {
   runApp(const MainApp());
@@ -1314,8 +1317,10 @@ class _UpdateScreenState extends State<UpdateScreen> {
             const SizedBox(height: 16),
             ElevatedButton.icon(
               icon: const Icon(Icons.download),
-              label: const Text('Force Download Current APK'),
-              onPressed: (_loading || _apkUrl == null) ? null : _forceDownloadApk, // Disabled if no APK
+              label: const Text('Force Download & Install APK'),
+              onPressed: (_loading || _apkUrl == null)
+                  ? null
+                  : () => downloadAndInstallApk(context, _apkUrl!),
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
@@ -1400,6 +1405,36 @@ Future<void> checkForTimeBasedUpdate(BuildContext context) async {
   } else {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('App is up to date.')),
+    );
+  }
+}
+
+Future<void> downloadAndInstallApk(BuildContext context, String apkUrl) async {
+  try {
+    final dir = await getExternalStorageDirectory();
+    if (dir == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not access storage.')),
+      );
+      return;
+    }
+    final filePath = '${dir.path}/update.apk';
+
+    // Show downloading indicator
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Downloading update...')),
+    );
+
+    // Download the APK
+    final response = await http.get(Uri.parse(apkUrl));
+    final file = File(filePath);
+    await file.writeAsBytes(response.bodyBytes);
+
+    // Prompt install
+    await InstallPlugin.installApk(filePath, 'com.your.package.name'); // <-- Replace with your package name
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to download or install APK: $e')),
     );
   }
 }
