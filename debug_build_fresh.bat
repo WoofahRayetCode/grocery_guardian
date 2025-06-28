@@ -23,9 +23,32 @@ cmd /c flutter clean
 echo Running flutter pub get...
 cmd /c flutter pub get
 
-echo Running flutter run (press q or Ctrl+C to quit)...
-flutter run
+REM Check for wireless and USB devices
+set WIRELESS_FOUND=
+set USB_FOUND=
+for /f "tokens=*" %%i in ('flutter devices') do (
+    echo %%i | findstr /i /c:"wireless" >nul && set WIRELESS_FOUND=1
+)
 
+if defined WIRELESS_FOUND (
+    echo Running flutter run on wireless device (press q or Ctrl+C to quit)...
+    flutter run
+    goto :end
+)
+
+REM If no wireless, check for USB
+for /f "tokens=*" %%i in ('flutter devices') do (
+    echo %%i | findstr /i /c:"usb" >nul && set USB_FOUND=1
+)
+
+if defined USB_FOUND (
+    echo Running flutter run on USB device (press q or Ctrl+C to quit)...
+    flutter run
+    goto :end
+)
+
+echo No wireless or USB device connected. Please connect a device.
+:end
 cls
 echo Terminal cleared. You can now run more commands.
 pause
