@@ -4,6 +4,7 @@
 *.pyc
 *.swp
 .DS_Store
+Thumbs.db
 .atom/
 .build/
 .buildlog/
@@ -18,33 +19,37 @@ migrate_working_dir/
 build/
 .pub/
 .metadata
+.flutter-plugins
 .flutter-plugins-dependencies
 pubspec.lock
+
 # IDEs
 .idea/
 .vscode/
 *.iml
+.cxx/
+.externalNativeBuild/
+
 # iOS
 ios/Pods/
 ios/Flutter/Flutter.framework
 ios/Flutter/App.framework
 ios/
+
 # Android
 android/.gradle/
 android/app/build/
 android/.kotlin/
-
-# Exclude any JDK/JRE folders
-**/lib/Oracle_JDK-*/
-**/jdk/>
-**/jre/>
-OpenJDK-24/
+.gradle/
+*.apk
+*.aab
 
 # Optional/Editor/OS/Temp files
 .env
 *.tmp
 *.bak
 *.orig
-Thumbs.db
 *.sublime-workspace
 *.sublime-project
+
+.fake
