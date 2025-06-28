@@ -38,6 +38,7 @@ android/.kotlin/
 **/lib/Oracle_JDK-*/
 **/jdk/>
 **/jre/>
+OpenJDK-24/
 
 # Optional/Editor/OS/Temp files
 .env
