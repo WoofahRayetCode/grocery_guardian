@@ -71,6 +71,7 @@ class _MainAppState extends State<MainApp> {
         '/allergyInfo': (context) => const AllergyInfoScreen(),
         '/resources': (context) => const LowIncomeResourcesScreen(),
         '/update': (context) => const UpdateScreen(),
+  '/credits': (context) => const CreditsScreen(),
       },
     );
   }
@@ -477,6 +478,16 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                       child: const ListTile(
                         leading: Icon(Icons.privacy_tip),
                         title: Text('View App Permissions'),
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/credits');
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.emoji_events_outlined),
+                        title: Text('Credits'),
                       ),
                     ),
                   ],
@@ -1190,6 +1201,106 @@ class UpdateScreen extends StatefulWidget {
 
   @override
   State<UpdateScreen> createState() => _UpdateScreenState();
+}
+
+// Simple Credits screen
+class CreditsScreen extends StatelessWidget {
+  const CreditsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Credits')),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          const ListTile(
+            leading: Icon(Icons.emoji_events_outlined),
+            title: Text('Grocery Guardian'),
+            subtitle: Text('Developed by WoofahRayetCode'),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.code),
+            title: Text('Open source'),
+            subtitle: Text('GitHub: WoofahRayetCode/grocery_guardian'),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.design_services),
+            title: Text('Icons'),
+            subtitle: Text('Material Icons'),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.favorite_outline),
+            title: Text('Special Thanks'),
+            subtitle: Text('Community testers, contributors, and supporters who helped shape the app.'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('NepheliaNyx'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PersonThanksScreen(name: 'NepheliaNyx'),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('Darh_JarJar'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PersonThanksScreen(name: 'Darh_JarJar'),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Simple details page for a person in Special Thanks
+class PersonThanksScreen extends StatelessWidget {
+  final String name;
+  const PersonThanksScreen({super.key, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(name)),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.favorite, color: Colors.redAccent),
+                const SizedBox(width: 8),
+                Text(
+                  'Special Thanks',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Huge thanks to $name for support and contributions to Grocery Guardian.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _UpdateScreenState extends State<UpdateScreen> {
