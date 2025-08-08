@@ -41,6 +41,17 @@
    flutter run
    ```
 
+### Linux helper scripts
+
+- Debug (fresh clean + run on device if present, else Linux desktop):
+  ```sh
+  bash ./debug_build_fresh.sh
+  ```
+- Release (fresh clean + build APK + install if device present):
+  ```sh
+  bash ./release_build_fresh.sh
+  ```
+
 ---
 
 **Grocery Guardian** is open source and welcomes contributions and suggestions!
