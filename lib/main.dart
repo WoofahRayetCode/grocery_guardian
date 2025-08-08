@@ -110,6 +110,23 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   final TextEditingController _itemController = TextEditingController();
   final TextEditingController _tagController = TextEditingController();
 
+  // Regular items (auto-load) feature state/keys
+  static const String _kCountsKey = 'regular_item_counts';
+  static const String _kAutoLoadKey = 'auto_load_regulars';
+  static const String _kRegularThresholdKey = 'regular_min_count';
+  static const String _kRegularMaxItemsKey = 'regular_max_items';
+  static const String _kRegularExcludeKey = 'regular_exclude_list';
+  static const String _kRegularAddModeKey = 'regular_add_mode'; // 'auto' or 'prompt'
+  static const String _kRegularOnlyIfEmptyKey = 'regular_only_if_empty';
+  static const String _kRegularInfoShownKey = 'regular_info_shown_v1';
+
+  bool _autoLoadRegulars = false;
+  int _regularMinCount = 3; // becomes regular after >=3 purchases
+  int _regularMaxItems = 20; // cap number of autoloaded items
+  String _regularAddMode = 'auto';
+  bool _autoloadOnlyIfEmpty = true;
+  Set<String> _regularExclude = {};
+
   // Add this map after FoodReactionDatabase to suggest alternatives:
   final Map<String, List<String>> allergyAlternatives = {
     'Milk': ['Oat milk', 'Almond milk', 'Soy milk', 'Coconut milk'],
@@ -284,7 +301,12 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     );
   }
 
-  void _uncheckAll() {
+  Future<void> _uncheckAll() async {
+    // Record purchased items to counts
+    final purchased = _mainItems.where((i) => i.checked).map((i) => i.name).toList(growable: false);
+    if (purchased.isNotEmpty) {
+      await _incrementCountsFor(purchased);
+    }
     setState(() {
       // Remove all checked items from main and tagged lists
       _mainItems.removeWhere((item) => item.checked);
@@ -310,6 +332,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   void initState() {
     super.initState();
     _showPermissionsOnFirstLaunch();
+  _loadAutoLoadSetting();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeAutoloadRegulars();
+    });
   }
 
   // Add this widget for the permissions info dialog:
@@ -378,6 +404,34 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 checked: widget.currentThemeMode == ThemeMode.dark,
                 child: const Text('Dark'),
               ),
+            ],
+          ),
+          // Quick Regular Items menu
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.history_toggle_off),
+            tooltip: 'Regular Items',
+            onSelected: (value) async {
+              switch (value) {
+                case 'load':
+                  await _loadRegularsNow();
+                  break;
+                case 'settings':
+                  _showRegularItemsSettings();
+                  break;
+                case 'clear':
+                  await _clearRegularCounts();
+                  break;
+                case 'help':
+                  await _showRegularInfoDialog();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'load', child: ListTile(leading: Icon(Icons.playlist_add), title: Text('Load regulars'))),
+              const PopupMenuItem(value: 'settings', child: ListTile(leading: Icon(Icons.settings), title: Text('Settings'))),
+              const PopupMenuItem(value: 'help', child: ListTile(leading: Icon(Icons.help_outline), title: Text('How it works'))),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'clear', child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.redAccent), title: Text('Clear history'))),
             ],
           ),
           IconButton(
@@ -490,6 +544,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                         title: Text('Credits'),
                       ),
                     ),
+                    // Regular Items settings moved to AppBar menu and empty-state card for quicker access.
                   ],
                 ),
               );
@@ -532,6 +587,42 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
               ],
             ),
             const SizedBox(height: 8),
+            // Empty-state helper to load regulars quickly
+            if (_mainItems.isEmpty && _taggedItems.isEmpty)
+              Card(
+                color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.history_toggle_off),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('Regular items', style: TextStyle(fontWeight: FontWeight.w600)),
+                            SizedBox(height: 2),
+                            Text('Load items you buy frequently or adjust settings', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: _showRegularItemsSettings,
+                        icon: const Icon(Icons.settings),
+                        label: const Text('Settings'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: _loadRegularsNow,
+                        icon: const Icon(Icons.playlist_add),
+                        label: const Text('Load'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             Expanded(
               child: Row(
                 children: [
@@ -752,11 +843,444 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                   ),
                 );
                 if (confirm == true) {
-                  _uncheckAll();
+                  await _uncheckAll();
                 }
               },
             )
           : null,
+    );
+  }
+
+  // ================= Regular items persistence & behavior =================
+  Future<void> _showRegularInfoDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Regular Items — How it works'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('This feature helps you rebuild your list faster by remembering what you buy often.'),
+              const SizedBox(height: 12),
+              const Text('• Counting purchases: Items are counted when you tap "Completed" (checked items only).'),
+              const SizedBox(height: 6),
+              Text('• Becomes regular after $_regularMinCount purchases (configurable).'),
+              const SizedBox(height: 6),
+              Text('• Max items per load: $_regularMaxItems (configurable).'),
+              const SizedBox(height: 6),
+              Text('• Add mode: ${_regularAddMode == 'prompt' ? 'Ask which to add' : 'Add automatically'}. Change any time.'),
+              const SizedBox(height: 6),
+              Text('• Only when list is empty: ${_autoloadOnlyIfEmpty ? 'On' : 'Off'} (configurable).'),
+              const SizedBox(height: 6),
+              const Text('• Exclude list: Add items you never want autoloaded.'),
+              const SizedBox(height: 12),
+              const Text('Tip: Use the Regular Items menu in the top bar to Load now, open Settings, or Clear history.'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _showRegularItemsSettings();
+            },
+            icon: const Icon(Icons.settings),
+            label: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+  Future<void> _loadAutoLoadSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _autoLoadRegulars = prefs.getBool(_kAutoLoadKey) ?? false;
+      _regularMinCount = prefs.getInt(_kRegularThresholdKey) ?? _regularMinCount;
+      _regularMaxItems = prefs.getInt(_kRegularMaxItemsKey) ?? _regularMaxItems;
+      _regularAddMode = prefs.getString(_kRegularAddModeKey) ?? _regularAddMode;
+      _autoloadOnlyIfEmpty = prefs.getBool(_kRegularOnlyIfEmptyKey) ?? _autoloadOnlyIfEmpty;
+      final excl = prefs.getStringList(_kRegularExcludeKey) ?? const [];
+      _regularExclude = excl.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    });
+  }
+
+  Future<void> _setAutoLoadSetting(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoLoadKey, enabled);
+    setState(() {
+      _autoLoadRegulars = enabled;
+    });
+    if (enabled) {
+      final shown = prefs.getBool(_kRegularInfoShownKey) ?? false;
+      if (!shown) {
+        await _showRegularInfoDialog();
+        await prefs.setBool(_kRegularInfoShownKey, true);
+      }
+    }
+  }
+
+  Future<Map<String, int>> _readCounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kCountsKey);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      return decoded.map((k, v) => MapEntry(k, (v as num).toInt()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _writeCounts(Map<String, int> counts) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kCountsKey, jsonEncode(counts));
+  }
+
+  Future<void> _incrementCountsFor(List<String> itemNames) async {
+    if (itemNames.isEmpty) return;
+    final counts = await _readCounts();
+    for (final name in itemNames) {
+      final key = name.trim();
+      if (key.isEmpty) continue;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    await _writeCounts(counts);
+  }
+
+  Future<List<String>> _getRegulars({int? minCount, int? maxItems}) async {
+    final counts = await _readCounts();
+    final threshold = minCount ?? _regularMinCount;
+    final cap = maxItems ?? _regularMaxItems;
+    final list = counts.entries
+        .where((e) => e.value >= threshold && !_regularExclude.contains(e.key))
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return list.take(cap).map((e) => e.key).toList();
+  }
+
+  Future<void> _maybeAutoloadRegulars() async {
+    if (!_autoLoadRegulars) return;
+    if (_autoloadOnlyIfEmpty && (_mainItems.isNotEmpty || _taggedItems.isNotEmpty)) return;
+    final regulars = await _getRegulars();
+    if (regulars.isEmpty) return;
+    if (_regularAddMode == 'prompt') {
+      await _promptAddRegulars(regulars, reason: _autoloadOnlyIfEmpty ? 'List is empty' : 'Autoload enabled');
+      return;
+    }
+    int added = 0;
+    setState(() {
+      for (final name in regulars) {
+        if (_mainItems.any((i) => i.name.toLowerCase() == name.toLowerCase())) continue;
+        _mainItems.add(_GroceryItem(name: name, tag: ''));
+        added++;
+      }
+    });
+    if (!mounted) return;
+    if (added > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Loaded $added regular item${added == 1 ? '' : 's'}')),
+      );
+    }
+  }
+
+  Future<void> _loadRegularsNow() async {
+    final regulars = await _getRegulars();
+    if (regulars.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No regular items yet. Shop a few times first.')),
+      );
+      return;
+    }
+    if (_regularAddMode == 'prompt') {
+      await _promptAddRegulars(regulars, reason: 'Load now');
+    } else {
+      int added = 0;
+      setState(() {
+        for (final name in regulars) {
+          if (_mainItems.any((i) => i.name.toLowerCase() == name.toLowerCase())) continue;
+          _mainItems.add(_GroceryItem(name: name, tag: ''));
+          added++;
+        }
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(added == 0 ? 'All regular items already on your list.' : 'Added $added regular item${added == 1 ? '' : 's'}')),
+      );
+    }
+  }
+
+  Future<void> _clearRegularCounts() async {
+    await _writeCounts({});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Regular item history cleared.')),
+    );
+  }
+
+  void _showRegularItemsSettings() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        bool localAuto = _autoLoadRegulars;
+        int localThreshold = _regularMinCount;
+        int localMaxItems = _regularMaxItems;
+        String localAddMode = _regularAddMode;
+        bool localOnlyIfEmpty = _autoloadOnlyIfEmpty;
+        final TextEditingController exclController = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setLocal) => AlertDialog(
+            title: const Text('Regular Items'),
+            content: SingleChildScrollView(
+              child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  title: const Text('Auto-load regularly bought items'),
+                  subtitle: const Text('Adds frequent items when the list is empty'),
+                  value: localAuto,
+                  onChanged: (v) {
+                    setLocal(() => localAuto = v);
+                    _setAutoLoadSetting(v);
+                  },
+                ),
+                const Divider(),
+                // Add mode
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Add mode'),
+                  subtitle: const Text('Choose how regulars are added'),
+                ),
+                RadioListTile<String>(
+                  title: const Text('Add automatically'),
+                  value: 'auto',
+                  groupValue: localAddMode,
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    setLocal(() => localAddMode = v);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString(_kRegularAddModeKey, v);
+                    setState(() => _regularAddMode = v);
+                  },
+                ),
+                RadioListTile<String>(
+                  title: const Text('Ask me which to add'),
+                  value: 'prompt',
+                  groupValue: localAddMode,
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    setLocal(() => localAddMode = v);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString(_kRegularAddModeKey, v);
+                    setState(() => _regularAddMode = v);
+                  },
+                ),
+                const Divider(),
+                // Only if empty
+                SwitchListTile(
+                  title: const Text('Only when list is empty'),
+                  value: localOnlyIfEmpty,
+                  onChanged: (v) async {
+                    setLocal(() => localOnlyIfEmpty = v);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool(_kRegularOnlyIfEmptyKey, v);
+                    setState(() => _autoloadOnlyIfEmpty = v);
+                  },
+                ),
+                const Divider(),
+                // Threshold
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Regular threshold'),
+                  subtitle: const Text('Times purchased before it becomes regular'),
+                  trailing: DropdownButton<int>(
+                    value: localThreshold,
+                    items: [1,2,3,4,5,6,7,8,9,10]
+                        .map((v) => DropdownMenuItem(value: v, child: Text(v.toString())))
+                        .toList(),
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      setLocal(() => localThreshold = v);
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setInt(_kRegularThresholdKey, v);
+                      setState(() => _regularMinCount = v);
+                    },
+                  ),
+                ),
+                // Max items
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Max items to add'),
+                  trailing: DropdownButton<int>(
+                    value: localMaxItems,
+                    items: const [5,10,15,20,30,50]
+                        .map((v) => DropdownMenuItem(value: v, child: Text(v.toString())))
+                        .toList(),
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      setLocal(() => localMaxItems = v);
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setInt(_kRegularMaxItemsKey, v);
+                      setState(() => _regularMaxItems = v);
+                    },
+                  ),
+                ),
+                const Divider(),
+                // Exclude list management
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Exclude items (never autoload):', style: Theme.of(context).textTheme.bodyMedium),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: -8,
+                  children: _regularExclude.map((e) => InputChip(
+                        label: Text(e),
+                        onDeleted: () async {
+                          final newSet = {..._regularExclude}..remove(e);
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setStringList(_kRegularExcludeKey, newSet.toList());
+                          setLocal(() {});
+                          setState(() => _regularExclude = newSet);
+                        },
+                      )).toList(),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: exclController,
+                        decoration: const InputDecoration(hintText: 'Item name', isDense: true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        final name = exclController.text.trim();
+                        if (name.isEmpty) return;
+                        final newSet = {..._regularExclude, name};
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setStringList(_kRegularExcludeKey, newSet.toList());
+                        exclController.clear();
+                        setLocal(() {});
+                        setState(() => _regularExclude = newSet);
+                      },
+                      icon: const Icon(Icons.block),
+                      label: const Text('Exclude'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _loadRegularsNow();
+                },
+                icon: const Icon(Icons.playlist_add),
+                label: const Text('Load now'),
+              ),
+              TextButton.icon(
+                onPressed: () async {
+                  await _clearRegularCounts();
+                },
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                label: const Text('Clear history'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _promptAddRegulars(List<String> candidates, {String? reason}) async {
+    // Filter out items already present
+    final existing = _mainItems.map((e) => e.name.toLowerCase()).toSet();
+    final filtered = candidates.where((e) => !existing.contains(e.toLowerCase())).toList();
+    if (filtered.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All regular items already on your list.')));
+      return;
+    }
+    final selected = <String>{...filtered};
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Add regular items?'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (reason != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(reason, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 320,
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: filtered.length,
+                    itemBuilder: (context, i) {
+                      final name = filtered[i];
+                      return CheckboxListTile(
+                        dense: true,
+                        title: Text(name),
+                        value: selected.contains(name),
+                        onChanged: (v) {
+                          setLocal(() {
+                            if (v == true) {
+                              selected.add(name);
+                            } else {
+                              selected.remove(name);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  for (final name in selected) {
+                    if (_mainItems.any((i) => i.name.toLowerCase() == name.toLowerCase())) continue;
+                    _mainItems.add(_GroceryItem(name: name, tag: ''));
+                  }
+                });
+                Navigator.pop(context);
+              },
+              icon: const Icon(Icons.add),
+              label: Text('Add ${selected.length}')
+            ),
+          ],
+        ),
+      ),
     );
   }
 
