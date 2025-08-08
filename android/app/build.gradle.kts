@@ -8,7 +8,6 @@ plugins {
 android {
     namespace = "com.woofahrayetcode.groceryguardian"
     compileSdk = 35
-    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -45,6 +44,7 @@ flutter {
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(17))
+    // Use JDK 21 toolchain (AGP/Gradle can run on 21) while compiling with source/target 17
+    languageVersion.set(JavaLanguageVersion.of(21))
     }
 }
