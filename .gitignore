@@ -21,7 +21,8 @@ build/
 .metadata
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
+# Note: For Flutter apps (not packages), commit pubspec.lock for reproducible builds.
+# If this repo is an app (it is), do NOT ignore pubspec.lock.
 
 # IDEs
 .idea/
@@ -44,8 +45,16 @@ android/.kotlin/
 *.apk
 *.aab
 
+# Extra safety for credentials/keystores anywhere in the repo
+**/*.keystore
+**/*.jks
+key.properties
+
 # Optional/Editor/OS/Temp files
 .env
+.env.*
+.envrc
+.direnv/
 *.tmp
 *.bak
 *.orig
@@ -53,3 +62,11 @@ android/.kotlin/
 *.sublime-project
 
 .fake
+
+# Flutter tooling and version managers
+.fvm/
+.flutter-versions
+
+# Test coverage outputs
+coverage/
+lcov.info
