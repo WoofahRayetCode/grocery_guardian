@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.woofahrayetcode.groceryguardian"
-    compileSdk = 35
+    compileSdk = 36
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -24,7 +24,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+    targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
