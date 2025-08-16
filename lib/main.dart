@@ -607,7 +607,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     return double.tryParse(cleaned) ?? 0.0;
   }
 
-  String _fmtCurrency(double value) => '\$' + value.toStringAsFixed(2);
+  String _fmtCurrency(double value) => '\$${value.toStringAsFixed(2)}';
 
   double get _totalAll => _mainItems.fold(0.0, (s, i) => s + (i.price));
   double get _totalChecked => _mainItems.where((i) => i.checked).fold(0.0, (s, i) => s + (i.price));
@@ -615,7 +615,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   Widget _totalChip(String label, double amount) {
     return Chip(
-      label: Text('$label: ' + _fmtCurrency(amount)),
+      label: Text('$label: ${_fmtCurrency(amount)}'),
       visualDensity: VisualDensity.compact,
     );
   }
@@ -657,7 +657,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         title: const Text('Grocery List'),
         actions: [
           Tooltip(
-            message: 'Profile: ' + _currentProfile,
+            message: 'Profile: $_currentProfile',
             child: IconButton(
               icon: const Icon(Icons.person),
               onPressed: _showProfileSelector,
