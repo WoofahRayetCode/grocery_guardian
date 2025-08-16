@@ -30,6 +30,11 @@ subprojects {
             }
         }
     }
+    // Enable detailed Java warnings for all Java compilation tasks
+    tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
+        options.compilerArgs.addAll(listOf("-Xlint:unchecked", "-Xlint:deprecation"))
+        options.isDeprecation = true
+    }
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
