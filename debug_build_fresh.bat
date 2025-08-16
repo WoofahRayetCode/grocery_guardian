@@ -1,4 +1,6 @@
 @echo off
+REM Configure wireless debugging endpoint (IP:PORT)
+set "WIRELESS_ENDPOINT=192.168.0.244:40183"
 REM Forcefully delete build folder
 rmdir /s /q build 2>nul
 
@@ -23,26 +25,29 @@ cmd /c flutter clean
 echo Running flutter pub get...
 cmd /c flutter pub get
 
-REM Check for wireless and USB devices
-set WIRELESS_FOUND=
-set USB_FOUND=
-for /f "tokens=*" %%i in ('flutter devices') do (
-    echo %%i | findstr /i /c:"wireless" >nul && set WIRELESS_FOUND=1
-)
+REM Try to connect to wireless device via ADB (ignore errors if adb missing)
+echo Attempting ADB connect to %WIRELESS_ENDPOINT% ...
+adb connect %WIRELESS_ENDPOINT% >nul 2>nul
+
+REM Check for wireless and USB devices (avoid parsing issues with parentheses)
+set "WIRELESS_FOUND="
+set "USB_FOUND="
+set "DEVICE_ID="
+
+REM Prefer the explicit wireless endpoint if present in devices
+flutter devices | findstr /i /c:"%WIRELESS_ENDPOINT%" >nul
+if not errorlevel 1 set "WIRELESS_FOUND=1"
+if defined WIRELESS_FOUND set "DEVICE_ID=%WIRELESS_ENDPOINT%"
 
 if defined WIRELESS_FOUND (
-    echo Running flutter run on wireless device (press q or Ctrl+C to quit)...
-    flutter run
+    echo Running flutter run on wireless device ^(press q or Ctrl+C to quit^)...
+    flutter run -d %DEVICE_ID%
     goto :end
 )
 
-REM If no wireless, check for USB
-for /f "tokens=*" %%i in ('flutter devices') do (
-    echo %%i | findstr /i /c:"usb" >nul && set USB_FOUND=1
-)
-
+flutter devices | findstr /i /c:"usb" >nul && set "USB_FOUND=1"
 if defined USB_FOUND (
-    echo Running flutter run on USB device (press q or Ctrl+C to quit)...
+    echo Running flutter run on USB device ^(press q or Ctrl+C to quit^)...
     flutter run
     goto :end
 )
