@@ -105,10 +105,19 @@ class GroceryListScreen extends StatefulWidget {
 }
 
 class _GroceryListScreenState extends State<GroceryListScreen> {
+  // Active lists for the currently selected profile (contents change on profile switch)
   final List<_GroceryItem> _mainItems = [];
   final List<_GroceryItem> _taggedItems = [];
+
+  // Profiles: keep separate lists per person to avoid mixing items
+  // Key: profile name (unique), Value: list for that profile
+  final Map<String, List<_GroceryItem>> _mainByProfile = {};
+  final Map<String, List<_GroceryItem>> _taggedByProfile = {};
+  final List<String> _profiles = [];
+  String _currentProfile = 'Everyone';
   final TextEditingController _itemController = TextEditingController();
   final TextEditingController _tagController = TextEditingController();
+  final TextEditingController _priceController = TextEditingController();
 
   // Regular items (auto-load) feature state/keys
   static const String _kCountsKey = 'regular_item_counts';
@@ -146,6 +155,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   void _addItem() async {
     final name = _itemController.text.trim();
     final tag = _tagController.text.trim();
+    final price = _parsePrice(_priceController.text);
 
     final commonReactions = FoodReactionDatabase.getReactionsForFood(name);
 
@@ -268,12 +278,14 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     if (name.isNotEmpty) {
       setState(() {
         if (tag.isNotEmpty) {
-          _taggedItems.add(_GroceryItem(name: name, tag: tag));
+          _taggedItems.add(_GroceryItem(name: name, tag: tag, price: price));
         } else {
-          _mainItems.add(_GroceryItem(name: name, tag: tag));
+          _mainItems.add(_GroceryItem(name: name, tag: tag, price: price));
         }
         _itemController.clear();
         _tagController.clear();
+        _priceController.clear();
+        _syncStoreFromCurrent();
       });
     }
   }
@@ -287,7 +299,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       return;
     }
     setState(() {
-      _mainItems.add(_GroceryItem(name: item.name, tag: item.tag));
+      _mainItems.add(_GroceryItem(name: item.name, tag: item.tag, price: item.price));
+      _syncStoreFromCurrent();
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -318,6 +331,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       for (var item in _taggedItems) {
         item.checked = false;
       }
+      _syncStoreFromCurrent();
     });
   }
 
@@ -325,6 +339,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   void dispose() {
     _itemController.dispose();
     _tagController.dispose();
+    _priceController.dispose();
     super.dispose();
   }
 
@@ -332,13 +347,182 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   void initState() {
     super.initState();
     _showPermissionsOnFirstLaunch();
+    _initProfiles();
   _loadAutoLoadSetting();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeAutoloadRegulars();
     });
   }
 
-  // Add this widget for the permissions info dialog:
+  Future<void> _initProfiles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('current_profile');
+    final profilesJson = prefs.getString('profiles_list');
+    List<String> loadedProfiles = [];
+    if (profilesJson != null && profilesJson.isNotEmpty) {
+      try {
+        final list = jsonDecode(profilesJson);
+        if (list is List) {
+          loadedProfiles = list.map((e) => e.toString()).toList();
+        }
+      } catch (_) {}
+    }
+    if (loadedProfiles.isEmpty) {
+      loadedProfiles = ['Everyone'];
+    }
+    // Ensure "Everyone" exists and is first
+    if (!loadedProfiles.contains('Everyone')) {
+      loadedProfiles.insert(0, 'Everyone');
+    } else {
+      loadedProfiles
+        ..remove('Everyone')
+        ..insert(0, 'Everyone');
+    }
+    _profiles
+      ..clear()
+      ..addAll(loadedProfiles);
+    // Load lists per profile
+    for (final p in _profiles) {
+      final key = _encodeProfileKey(p);
+      final mainStr = prefs.getString('profile_main_$key');
+      final taggedStr = prefs.getString('profile_tagged_$key');
+      _mainByProfile[p] = _deserializeItems(mainStr);
+      _taggedByProfile[p] = _deserializeItems(taggedStr);
+    }
+    // Fallback to empty lists for missing
+    _mainByProfile.putIfAbsent('Everyone', () => <_GroceryItem>[]);
+    _taggedByProfile.putIfAbsent('Everyone', () => <_GroceryItem>[]);
+    // Activate saved or default profile without persisting
+    _switchProfile(saved ?? 'Everyone', persist: false);
+  }
+
+  void _switchProfile(String name, {bool persist = true}) async {
+    if (name.isEmpty) return;
+    if (!_profiles.contains(name)) {
+      _profiles.add(name);
+    }
+    // Ensure store lists exist
+    _mainByProfile.putIfAbsent(name, () => <_GroceryItem>[]);
+    _taggedByProfile.putIfAbsent(name, () => <_GroceryItem>[]);
+  // Save current active lists to store before switching and persist them
+  _syncStoreFromCurrent();
+  await _persistCurrentProfileData();
+    // Change current and pull lists into active buffers
+    setState(() {
+      _currentProfile = name;
+      _mainItems
+        ..clear()
+        ..addAll(_mainByProfile[name] ?? const <_GroceryItem>[]);
+      _taggedItems
+        ..clear()
+        ..addAll(_taggedByProfile[name] ?? const <_GroceryItem>[]);
+    });
+    if (persist) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('current_profile', _currentProfile);
+  await _persistProfilesList();
+    }
+  }
+
+  void _syncStoreFromCurrent() {
+    // Keep the backing store in sync with visible lists for current profile
+    _mainByProfile[_currentProfile] = List<_GroceryItem>.from(_mainItems);
+    _taggedByProfile[_currentProfile] = List<_GroceryItem>.from(_taggedItems);
+  }
+
+  // Profile selector UI
+  Future<void> _showProfileSelector() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final controller = TextEditingController();
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 12,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.people_alt),
+                  const SizedBox(width: 8),
+                  const Text('Profiles', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  TextButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add'),
+                    onPressed: () {
+                      final name = controller.text.trim();
+                      if (name.isEmpty) return;
+                      _switchProfile(name);
+                      Navigator.pop(context);
+                    },
+                  )
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'New profile name',
+                  prefixIcon: Icon(Icons.person_add),
+                ),
+                onSubmitted: (_) {
+                  final name = controller.text.trim();
+                  if (name.isEmpty) return;
+                  _switchProfile(name);
+                  Navigator.pop(context);
+                },
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _profiles.length,
+                  itemBuilder: (context, i) {
+                    final name = _profiles[i];
+                    return ListTile(
+                      leading: Icon(name == _currentProfile ? Icons.radio_button_checked : Icons.radio_button_off),
+                      title: Text(name),
+                      trailing: name != 'Everyone'
+                          ? IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () async {
+                                setState(() {
+                                  _mainByProfile.remove(name);
+                                  _taggedByProfile.remove(name);
+                                  _profiles.remove(name);
+                                  if (_currentProfile == name) {
+                                    _switchProfile('Everyone');
+                                  }
+                                });
+                                await _persistProfilesList();
+                              },
+                            )
+                          : null,
+                      onTap: () {
+                        _switchProfile(name);
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Permissions dialog helpers
   void showPermissionsDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -360,18 +544,109 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       ),
     );
   }
-  
-    Future<void> _showPermissionsOnFirstLaunch() async {
-      final prefs = await SharedPreferences.getInstance();
-      final shown = prefs.getBool('permissions_shown') ?? false;
-      if (!shown) {
-        if (!mounted) return;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          showPermissionsDialog(context);
-        });
-        await prefs.setBool('permissions_shown', true);
-      }
+
+  Future<void> _showPermissionsOnFirstLaunch() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shown = prefs.getBool('permissions_shown') ?? false;
+    if (!shown) {
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        showPermissionsDialog(context);
+      });
+      await prefs.setBool('permissions_shown', true);
     }
+  }
+
+  String _encodeProfileKey(String name) => Uri.encodeComponent(name);
+
+  Future<void> _persistProfilesList() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('profiles_list', jsonEncode(_profiles));
+  }
+
+  List<Map<String, dynamic>> _serializeItems(List<_GroceryItem> items) =>
+      items
+          .map((e) => {
+                'name': e.name,
+                'tag': e.tag,
+                'checked': e.checked,
+                'price': e.price,
+              })
+          .toList();
+
+  List<_GroceryItem> _deserializeItems(String? jsonStr) {
+    if (jsonStr == null || jsonStr.isEmpty) return <_GroceryItem>[];
+    try {
+      final data = jsonDecode(jsonStr);
+      if (data is List) {
+        return data.map<_GroceryItem>((e) {
+          final m = Map<String, dynamic>.from(e as Map);
+          final item = _GroceryItem(
+            name: m['name'] as String? ?? '',
+            tag: m['tag'] as String? ?? '',
+            price: (m['price'] is num) ? (m['price'] as num).toDouble() : 0.0,
+          );
+          item.checked = (m['checked'] as bool?) ?? false;
+          return item;
+        }).toList();
+      }
+    } catch (_) {}
+    return <_GroceryItem>[];
+  }
+
+  Future<void> _persistCurrentProfileData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _encodeProfileKey(_currentProfile);
+    await prefs.setString('profile_main_$key', jsonEncode(_serializeItems(_mainItems)));
+    await prefs.setString('profile_tagged_$key', jsonEncode(_serializeItems(_taggedItems)));
+  }
+
+  // ===== Prices: helpers & UI =====
+  double _parsePrice(String input) {
+    final cleaned = input.trim().replaceAll(RegExp(r'[^0-9\.-]'), '');
+    return double.tryParse(cleaned) ?? 0.0;
+  }
+
+  String _fmtCurrency(double value) => '\$' + value.toStringAsFixed(2);
+
+  double get _totalAll => _mainItems.fold(0.0, (s, i) => s + (i.price));
+  double get _totalChecked => _mainItems.where((i) => i.checked).fold(0.0, (s, i) => s + (i.price));
+  double get _totalRemaining => _mainItems.where((i) => !i.checked).fold(0.0, (s, i) => s + (i.price));
+
+  Widget _totalChip(String label, double amount) {
+    return Chip(
+      label: Text('$label: ' + _fmtCurrency(amount)),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Future<void> _editItemPrice(_GroceryItem item) async {
+    final controller = TextEditingController(text: item.price == 0 ? '' : item.price.toStringAsFixed(2));
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Set price for "${item.name}"'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(prefixText: '\$ ', hintText: 'e.g. 2.49'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                item.price = _parsePrice(controller.text);
+                _syncStoreFromCurrent();
+              });
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -381,6 +656,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       appBar: AppBar(
         title: const Text('Grocery List'),
         actions: [
+          Tooltip(
+            message: 'Profile: ' + _currentProfile,
+            child: IconButton(
+              icon: const Icon(Icons.person),
+              onPressed: _showProfileSelector,
+            ),
+          ),
           // Theme toggle button
           PopupMenuButton<ThemeMode>(
             icon: const Icon(Icons.dark_mode),
@@ -580,11 +862,37 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _priceController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Price',
+                      prefixText: '\$ ',
+                    ),
+                    onSubmitted: (_) => _addItem(),
+                  ),
+                ),
                 IconButton(
                   icon: const Icon(Icons.add),
                   onPressed: _addItem,
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: -8,
+                children: [
+                  _totalChip('Remaining', _totalRemaining),
+                  _totalChip('Selected', _totalChecked),
+                  _totalChip('All', _totalAll),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
             // Empty-state helper to load regulars quickly
@@ -660,6 +968,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                                 onPressed: () {
                                                   setState(() {
                                                     _mainItems.removeAt(index);
+                                                    _syncStoreFromCurrent();
                                                   });
                                                   Navigator.pop(context);
                                                 },
@@ -676,6 +985,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                         onChanged: (checked) {
                                           setState(() {
                                             item.checked = checked ?? false;
+                                            _syncStoreFromCurrent();
                                           });
                                         },
                                         title: Row(
@@ -705,6 +1015,27 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                                 padding: const EdgeInsets.only(left: 8.0),
                                                 child: Icon(Icons.warning, color: Colors.red[700], size: 16),
                                               ),
+                                            Padding(
+                                              padding: const EdgeInsets.only(left: 8.0),
+                                              child: InkWell(
+                                                onTap: () => _editItemPrice(item),
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                                    borderRadius: BorderRadius.circular(12),
+                                                  ),
+                                                  child: Text(
+                                                    item.price > 0 ? _fmtCurrency(item.price) : 'Add price',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: item.price > 0 ? Colors.grey[800] : Theme.of(context).colorScheme.primary,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
                                           ],
                                         ),
                                         subtitle: item.tag.isNotEmpty
@@ -764,6 +1095,20 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                       trailing: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
+                                          InkWell(
+                                            onTap: () => _editItemPrice(item),
+                                            child: Padding(
+                                              padding: const EdgeInsets.only(right: 6.0),
+                                              child: Text(
+                                                item.price > 0 ? _fmtCurrency(item.price) : 'Add price',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: item.price > 0 ? Colors.grey[700] : Theme.of(context).colorScheme.primary,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                           IconButton(
                                             icon: const Icon(Icons.add_shopping_cart, size: 20),
                                             tooltip: 'Add to main list',
@@ -775,6 +1120,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                             onPressed: () {
                                               setState(() {
                                                 _taggedItems.removeAt(index);
+                                                _syncStoreFromCurrent();
                                               });
                                             },
                                           ),
@@ -795,6 +1141,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                                 onPressed: () {
                                                   setState(() {
                                                     _taggedItems.removeAt(index);
+                                                    _syncStoreFromCurrent();
                                                   });
                                                   Navigator.pop(context);
                                                 },
@@ -1397,9 +1744,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 class _GroceryItem {
   final String name;
   final String tag;
+  double price;
   bool checked;
 
-  _GroceryItem({required this.name, required this.tag}) : checked = false;
+  _GroceryItem({required this.name, required this.tag, this.price = 0.0}) : checked = false;
 }
 
 class FoodReactionDatabase {
