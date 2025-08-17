@@ -295,15 +295,35 @@ echo "==> Building release APKs (flavors)"
 "$FLUTTER_BIN" build apk --release --flavor oss || true
 "$FLUTTER_BIN" build apk --release --flavor play || true
 
-# Prefer OSS APK, then Play, then generic if present
+# Gather all possible APKs for upload; pick one primary for install
+OSS_APK="build/app/outputs/flutter-apk/app-oss-release.apk"
+PLAY_APK="build/app/outputs/flutter-apk/app-play-release.apk"
+GENERIC_APK="build/app/outputs/flutter-apk/app-release.apk"
+
 APK_PATH=""
-if [[ -f "build/app/outputs/flutter-apk/app-oss-release.apk" ]]; then
-  APK_PATH="build/app/outputs/flutter-apk/app-oss-release.apk"
-elif [[ -f "build/app/outputs/flutter-apk/app-play-release.apk" ]]; then
-  APK_PATH="build/app/outputs/flutter-apk/app-play-release.apk"
-elif [[ -f "build/app/outputs/flutter-apk/app-release.apk" ]]; then
-  APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+if [[ -f "$OSS_APK" ]]; then
+  APK_PATH="$OSS_APK"
+elif [[ -f "$PLAY_APK" ]]; then
+  APK_PATH="$PLAY_APK"
+elif [[ -f "$GENERIC_APK" ]]; then
+  APK_PATH="$GENERIC_APK"
 fi
+
+upload_all_apks() {
+  local any=0
+  if [[ -x "$SCRIPT_DIR/tools/upload_to_gdrive.sh" ]]; then
+    for f in "$OSS_APK" "$PLAY_APK" "$GENERIC_APK"; do
+      if [[ -f "$f" ]]; then
+        any=1
+        echo "==> Uploading APK to Google Drive: $f"
+        "$SCRIPT_DIR/tools/upload_to_gdrive.sh" "$f" || echo "WARN: Upload failed for $f"
+      fi
+    done
+  else
+    echo "INFO: Upload script not found or not executable: $SCRIPT_DIR/tools/upload_to_gdrive.sh"
+  fi
+  return $any
+}
 
 echo "==> Checking for connected Android devices (USB or wireless)"
 
@@ -327,7 +347,8 @@ if [[ -n "$SELECTED_DEVICE" && -n "$APK_PATH" ]]; then
   # Prefer adb direct install for explicit APK
   if command -v adb >/dev/null 2>&1; then
     if adb -s "$SELECTED_DEVICE" install -r "$APK_PATH"; then
-      echo "==> Done."
+      echo "==> Install successful."
+  upload_all_apks || true
       exit 0
     fi
   fi
@@ -339,7 +360,8 @@ if [[ -n "$SELECTED_DEVICE" && -n "$APK_PATH" ]]; then
   fi
   # Last resort, let Flutter try generic install
   if "$FLUTTER_BIN" install -d "$SELECTED_DEVICE" -v; then
-    echo "==> Done."
+    echo "==> Install successful."
+    upload_all_apks || true
     exit 0
   fi
   echo "WARN: flutter install failed or device not recognized by Flutter. Attempting Gradle install..."
@@ -350,6 +372,7 @@ fi
 
 if [[ -n "$APK_PATH" ]]; then
   echo "==> No Android device detected. APK built at: $APK_PATH"
+  upload_all_apks || true
 else
   echo "ERROR: APK not found under build/app/outputs/flutter-apk."
   exit 1
