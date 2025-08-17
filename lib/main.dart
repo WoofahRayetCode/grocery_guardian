@@ -8,11 +8,26 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart'; // Add this import at the top if not present
 import 'package:package_info_plus/package_info_plus.dart'; // Add this import at the top
-import 'package:apk_installer/apk_installer.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+// import 'package:apk_installer/apk_installer.dart'; // removed: no in-app APK installs
+// import 'package:path_provider/path_provider.dart';
+// import 'dart:io';
+import 'screens/scan_product_screen.dart';
+import 'services/product_lookup.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart' as gma;
 
-void main() {
+// Compile-time feature flags for store-specific builds
+const bool kAdsEnabled = bool.fromEnvironment('ADS', defaultValue: false);
+const bool kDonationsEnabled = bool.fromEnvironment('DONATIONS', defaultValue: true);
+const String kBannerAdUnitId = String.fromEnvironment(
+  'ADMOB_BANNER_ANDROID_ID',
+  defaultValue: 'ca-app-pub-3940256099942544/6300978111', // Google test banner id
+);
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (kAdsEnabled) {
+    await gma.MobileAds.instance.initialize();
+  }
   runApp(const MainApp());
 }
 
@@ -59,9 +74,12 @@ class _MainAppState extends State<MainApp> {
 
   @override
   Widget build(BuildContext context) {
+  // Build light/dark themes with Material 3
+  final ThemeData lightTheme = ThemeData.light(useMaterial3: true);
+  final ThemeData darkTheme = ThemeData.dark(useMaterial3: true);
     return MaterialApp(
-      theme: ThemeData.light(),
-      darkTheme: ThemeData.dark(),
+      theme: lightTheme,
+      darkTheme: darkTheme,
       themeMode: _themeMode,
       home: GroceryListScreen(
         onThemeChanged: _setTheme,
@@ -72,6 +90,8 @@ class _MainAppState extends State<MainApp> {
         '/resources': (context) => const LowIncomeResourcesScreen(),
         '/update': (context) => const UpdateScreen(),
   '/credits': (context) => const CreditsScreen(),
+        '/scan': (context) => const ScanProductScreen(),
+  '/allergyList': (context) => const UserAllergyListScreen(),
       },
     );
   }
@@ -152,28 +172,222 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     // Add more as needed
   };
 
+  // Keywords for non-food items often associated with contact/fragrance allergies
+  static const Set<String> _nonFoodAllergyKeywords = {
+    'lotion','cream','moisturizer','moisturiser','deodorant','antiperspirant','sunscreen','sunblock',
+    'perfume','fragrance','parfum','cologne','shampoo','conditioner','cleanser','soap','body wash','wash','toner','serum','balm','oil'
+  };
+
+  String _normalizeItemKey(String s) => s.trim().toLowerCase();
+
+  Future<bool> _hasPromptedExistingAllergy(String normalizedKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'allergy_prompted::'+_encodeProfileKey(_currentProfile)+'::'+normalizedKey;
+    return prefs.getBool(key) ?? false;
+  }
+
+  Future<void> _setPromptedExistingAllergy(String normalizedKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'allergy_prompted::'+_encodeProfileKey(_currentProfile)+'::'+normalizedKey;
+    await prefs.setBool(key, true);
+  }
+
+  Future<void> _addUserAllergyPreference(String normalizedKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final listKey = 'user_allergy_items::'+_encodeProfileKey(_currentProfile);
+    final current = prefs.getStringList(listKey) ?? <String>[];
+    if (!current.contains(normalizedKey)) {
+      current.add(normalizedKey);
+      await prefs.setStringList(listKey, current);
+    }
+  }
+
+  Future<List<String>> _getUserAllergyList() async {
+    final prefs = await SharedPreferences.getInstance();
+    final listKey = 'user_allergy_items::'+_encodeProfileKey(_currentProfile);
+    return prefs.getStringList(listKey) ?? <String>[];
+  }
+
+  Future<void> _removeUserAllergyPreference(String normalizedKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final listKey = 'user_allergy_items::'+_encodeProfileKey(_currentProfile);
+    final current = prefs.getStringList(listKey) ?? <String>[];
+    current.removeWhere((e) => e == normalizedKey);
+    await prefs.setStringList(listKey, current);
+  }
+
+  bool _looksLikeCommonAllergenTerm(String normalizedName) {
+    // Exact match on known food allergens list
+    final isFood = FoodReactionDatabase.commonReactions.any((e) => e.food.toLowerCase() == normalizedName);
+    if (isFood) return true;
+    // Contains non-food allergy keywords
+    for (final k in _nonFoodAllergyKeywords) {
+      if (normalizedName.contains(k)) return true;
+    }
+    return false;
+  }
+
   void _addItem() async {
     final name = _itemController.text.trim();
     final tag = _tagController.text.trim();
     final price = _parsePrice(_priceController.text);
 
-    final commonReactions = FoodReactionDatabase.getReactionsForFood(name);
+    // One-time prompt for known allergen-prone items (food or non-food)
+    final normalized = _normalizeItemKey(name);
+    if (normalized.isNotEmpty && _looksLikeCommonAllergenTerm(normalized)) {
+      final already = await _hasPromptedExistingAllergy(normalized);
+      if (!already && mounted) {
+        bool saidHasAllergy = false;
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Existing allergy?'),
+            content: Text('Do you or your household have an existing allergy related to "$name"?'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: const Text('No'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  saidHasAllergy = true;
+                  Navigator.pop(context);
+                },
+                child: const Text('Yes'),
+              ),
+            ],
+          ),
+        );
+        await _setPromptedExistingAllergy(normalized);
+        if (saidHasAllergy) {
+          await _addUserAllergyPreference(normalized);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Saved allergy preference for "$name".')),
+            );
+          }
+        }
+      }
+    }
 
-    if (commonReactions.isNotEmpty) {
+    final commonReactions = FoodReactionDatabase.getReactionsForFood(name);
+  // Query OpenFoodFacts/Open Beauty Facts for up-to-date info
+    ScannedProduct? off; 
+    if (name.isNotEmpty) {
+      off = await ProductLookupService.searchAnyByName(name);
+    }
+
+    // Merge allergens from OFF and local database
+    final offAllergenList = off?.allergens ?? const [];
+    final mergedAllergens = {
+      ...commonReactions,
+      ...offAllergenList.map((e) => e),
+    }.toList();
+    // Precompute some optional fields for display
+    final offName = off?.name;
+    final offBrand = off?.brand;
+    final offIngredients = off?.ingredientsText ?? '';
+    final offNutri = off?.nutriScore;
+
+    if (mergedAllergens.isNotEmpty) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Allergy Warning'),
+          title: const Text('Allergy Warning (OpenFoodFacts)'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '"$name" is a common food allergen!',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
+              if (offName != null)
+                Text('Product: $offName${offBrand != null ? ' ($offBrand)' : ''}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              if (offName == null)
+                Text('"$name" may contain allergens', style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              ...commonReactions.map((r) => Text('• $r', style: const TextStyle(color: Colors.red))),
+              if (mergedAllergens.isNotEmpty) ...[
+                const Text('Allergens detected:'),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: -8,
+                  children: mergedAllergens.map((a) => Chip(
+                    label: Text(a),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                    labelStyle: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer, fontWeight: FontWeight.w600),
+                    side: BorderSide(color: Theme.of(context).colorScheme.error, width: 1.0),
+                  )).toList(),
+                ),
+                const SizedBox(height: 8),
+              ],
+              if ((off?.productType ?? '').isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Row(
+                    children: [
+                      Chip(
+                        label: Text(off!.productType!),
+                        visualDensity: VisualDensity.compact,
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        side: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1.0),
+                      ),
+                      const SizedBox(width: 8),
+                      if ((off.source ?? '').isNotEmpty)
+                        Chip(
+                          label: Text(off.source == 'obf' ? 'Open Beauty Facts' : 'Open Food Facts'),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          side: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1.0),
+                        ),
+                      if ((off.usageHint ?? '').isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Chip(
+                          label: Text(off.usageHint!),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          side: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1.0),
+                        ),
+                      ],
+                      if ((off.babyCautions).isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        ...off.babyCautions.take(2).map((c) => Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: Chip(
+                            label: Text(c),
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                            labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSecondaryContainer),
+                            side: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 1.0),
+                          ),
+                        )),
+                      ],
+                      if ((off.maternityCautions).isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        ...off.maternityCautions.take(2).map((c) => Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: Chip(
+                            label: Text(c),
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+                            labelStyle: TextStyle(color: Theme.of(context).colorScheme.onTertiaryContainer),
+                            side: BorderSide(color: Theme.of(context).colorScheme.tertiary, width: 1.0),
+                          ),
+                        )),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              if (offIngredients.isNotEmpty) ...[
+                const Text('Ingredients (from OFF):', style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(offIngredients, maxLines: 4, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 8),
+              ],
+              if (offNutri != null) ...[
+                Text('Nutri-Score: ${offNutri.toUpperCase()}'),
+                const SizedBox(height: 4),
+              ],
               const SizedBox(height: 16),
               const Text(
                 'Are you purchasing this for someone else (not yourself)?',
@@ -186,6 +400,14 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
               onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancel'),
             ),
+            if (off != null)
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(context, true);
+                  await _showProductDetails(context, off!);
+                },
+                child: const Text('Details'),
+              ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Yes, for someone else'),
@@ -196,8 +418,12 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       if (!mounted) return; // <-- Add this line
 
       if (confirmed != true) {
-        // Recommend alternatives if available
-        final alternatives = allergyAlternatives[name];
+        // Recommend alternatives if available (prefer OFF allergen-based)
+        final baseAllergen = mergedAllergens.firstWhere(
+          (a) => allergyAlternatives.containsKey(a),
+          orElse: () => name,
+        );
+        final alternatives = allergyAlternatives[baseAllergen];
         _itemController.clear();
         _tagController.clear();
 
@@ -208,12 +434,12 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             builder: (context) {
               return StatefulBuilder(
                 builder: (context, setState) => AlertDialog(
-                  title: const Text('Try These Alternatives'),
+                  title: Text('Alternatives for $baseAllergen'),
                   content: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Consider these safe alternatives for "$name":'),
+                      Text('Consider these safe alternatives for "${off?.name ?? name}":'),
                       const SizedBox(height: 8),
                       ...alternatives.map((alt) => ListTile(
                             title: Text(alt),
@@ -276,11 +502,24 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     }
 
     if (name.isNotEmpty) {
+      final userAllergyList = await _getUserAllergyList();
       setState(() {
         if (tag.isNotEmpty) {
-          _taggedItems.add(_GroceryItem(name: name, tag: tag, price: price));
+      _taggedItems.add(_GroceryItem(name: off?.name ?? name, tag: tag, price: price));
         } else {
-          _mainItems.add(_GroceryItem(name: name, tag: tag, price: price));
+      final offAllergensLower = (off?.allergens ?? const []).map((e) => e.toLowerCase()).toSet();
+      final commonAllergens = <String>['Milk','Eggs','Peanuts','Tree nuts','Wheat','Soy','Fish','Shellfish','Sesame'];
+      final matched = commonAllergens.where((a) => offAllergensLower.contains(a.toLowerCase())).toList();
+      final Set<String> mergedSet = {...matched, ...commonReactions};
+      final bool userFlag = userAllergyList.contains(_normalizeItemKey(name));
+      String mergedTag = '';
+      if (mergedSet.isNotEmpty) {
+        mergedTag = 'Allergen: ${mergedSet.join(', ')}';
+      }
+      if (userFlag) {
+        mergedTag = mergedTag.isEmpty ? 'User allergy' : '$mergedTag; User allergy';
+      }
+      _mainItems.add(_GroceryItem(name: off?.name ?? name, tag: mergedTag, price: price));
         }
         _itemController.clear();
         _tagController.clear();
@@ -305,7 +544,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Warning: "${item.name}" has a discomfort tag: "${item.tag}"',
+          'Warning: "${item.name}" has a Discomfort: "${item.tag}"',
           style: const TextStyle(color: Colors.yellow),
         ),
         backgroundColor: Colors.red[700],
@@ -614,9 +853,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   double get _totalRemaining => _mainItems.where((i) => !i.checked).fold(0.0, (s, i) => s + (i.price));
 
   Widget _totalChip(String label, double amount) {
+    final cs = Theme.of(context).colorScheme;
     return Chip(
       label: Text('$label: ${_fmtCurrency(amount)}'),
       visualDensity: VisualDensity.compact,
+      backgroundColor: cs.surfaceContainerHighest,
+      labelStyle: TextStyle(color: cs.onSurface),
+      side: BorderSide(color: cs.outline, width: 1.0),
     );
   }
 
@@ -652,7 +895,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   Widget build(BuildContext context) {
     final allChecked = _mainItems.isNotEmpty && _mainItems.every((item) => item.checked);
 
-    return Scaffold(
+  return Scaffold(
       appBar: AppBar(
         title: const Text('Grocery List'),
         actions: [
@@ -662,6 +905,137 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
               icon: const Icon(Icons.person),
               onPressed: _showProfileSelector,
             ),
+          ),
+          IconButton(
+            tooltip: 'Scan barcode',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () async {
+              final result = await Navigator.pushNamed(context, '/scan');
+              if (!mounted) return;
+              if (result == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('No product found for that barcode. Try searching by name.')),
+                );
+                return;
+              }
+              if (result is ScannedProduct) {
+                final displayName = result.name?.isNotEmpty == true
+                    ? result.name!
+                    : 'Item ${result.barcode}';
+                final knownReactions = FoodReactionDatabase.getReactionsForFood(displayName);
+                final offAllergens = result.allergens.map((e) => e.toLowerCase()).toSet();
+                final commonAllergens = <String>['Milk','Eggs','Peanuts','Tree nuts','Wheat','Soy','Fish','Shellfish','Sesame'];
+                final matched = commonAllergens.where((a) => offAllergens.contains(a.toLowerCase())).toList();
+
+                final allergensMerged = {...matched, ...knownReactions}.toList();
+
+                final add = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text(displayName),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if ((result.imageUrl ?? '').isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: Image.network(result.imageUrl!, height: 140, fit: BoxFit.cover),
+                              ),
+                            ),
+                          if (allergensMerged.isNotEmpty) ...[
+                            const Text('Allergens detected:'),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: -8,
+                              children: allergensMerged.map((a) => Chip(
+                                label: Text(a),
+                                visualDensity: VisualDensity.compact,
+                                backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                                labelStyle: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer, fontWeight: FontWeight.w600),
+                                side: BorderSide(color: Theme.of(context).colorScheme.error, width: 1.0),
+                              )).toList(),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          if ((result.ingredientsText ?? '').isNotEmpty) ...[
+                            const Text('Ingredients:'),
+                            Text(result.ingredientsText!, maxLines: 5, overflow: TextOverflow.ellipsis),
+                            const SizedBox(height: 8),
+                          ],
+                          if ((result.nutriScore ?? '').isNotEmpty) Text('Nutri-Score: ${result.nutriScore!.toUpperCase()}'),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Alternatives'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          await _showProductDetails(context, result);
+                        },
+                        child: const Text('Details'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Add to list'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (add == true) {
+                  final tag = allergensMerged.isNotEmpty ? 'Allergen: ${allergensMerged.join(', ')}' : '';
+                  setState(() {
+                    _mainItems.add(_GroceryItem(name: displayName, tag: tag));
+                    _syncStoreFromCurrent();
+                  });
+                } else if (add == false) {
+                  // Show alternatives dialog (based on detected allergens)
+                  // Pick the first matched allergen that we have alternatives for
+                  final baseAllergen = allergensMerged.firstWhere(
+                    (a) => allergyAlternatives.containsKey(a),
+                    orElse: () => displayName,
+                  );
+                  final alternatives = allergyAlternatives[baseAllergen] ?? const <String>[];
+                  if (alternatives.isNotEmpty) {
+                    await showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: Text('Alternatives for $baseAllergen'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: alternatives.map((alt) => ListTile(
+                            title: Text(alt),
+                            trailing: const Icon(Icons.add),
+                            onTap: () {
+                              setState(() {
+                                _mainItems.add(_GroceryItem(name: alt, tag: 'Option Chosen for $baseAllergen'));
+                                _syncStoreFromCurrent();
+                              });
+                              Navigator.pop(context);
+                            },
+                          )).toList(),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Cancel'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                }
+              }
+            },
           ),
           // Theme toggle button
           PopupMenuButton<ThemeMode>(
@@ -745,7 +1119,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                         title: Text('Find Low Income Resources'),
                       ),
                     ),
-                    SimpleDialogOption(
+                    if (kDonationsEnabled)
+                      SimpleDialogOption(
                       onPressed: () async {
                         Navigator.pop(context);
                         final uri = Uri.parse('https://www.paypal.com/donate/?business=WZACHCSCA5SMS&no_recurring=0&currency_code=USD');
@@ -817,6 +1192,21 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                       ),
                     ),
                     SimpleDialogOption(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        final count = await ProductLookupCache.totalEntryCount();
+                        final removed = await ProductLookupCache.clearAll();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Cleared $removed product cache entr${removed == 1 ? 'y' : 'ies'} (was $count)')),
+                        );
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.cleaning_services),
+                        title: Text('Clear product caches (OFF + OBF)'),
+                      ),
+                    ),
+                    SimpleDialogOption(
                       onPressed: () {
                         Navigator.pop(context);
                         Navigator.pushNamed(context, '/credits');
@@ -826,7 +1216,16 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                         title: Text('Credits'),
                       ),
                     ),
-                    // Regular Items settings moved to AppBar menu and empty-state card for quicker access.
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/allergyList');
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.warning_amber_rounded),
+                        title: Text('My allergy items'),
+                      ),
+                    ),
                   ],
                 ),
               );
@@ -839,7 +1238,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ),
         ],
       ),
-      body: Padding(
+  body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
@@ -855,10 +1254,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TextField(
+          child: TextField(
                     controller: _tagController,
                     decoration: const InputDecoration(
-                      labelText: 'Discomfort Tag (optional)',
+            labelText: 'Discomfort (optional)',
                     ),
                   ),
                 ),
@@ -1403,29 +1802,70 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                   title: const Text('Add mode'),
                   subtitle: const Text('Choose how regulars are added'),
                 ),
-                RadioListTile<String>(
-                  title: const Text('Add automatically'),
-                  value: 'auto',
-                  groupValue: localAddMode,
-                  onChanged: (v) async {
-                    if (v == null) return;
-                    setLocal(() => localAddMode = v);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString(_kRegularAddModeKey, v);
-                    setState(() => _regularAddMode = v);
-                  },
-                ),
-                RadioListTile<String>(
-                  title: const Text('Ask me which to add'),
-                  value: 'prompt',
-                  groupValue: localAddMode,
-                  onChanged: (v) async {
-                    if (v == null) return;
-                    setLocal(() => localAddMode = v);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString(_kRegularAddModeKey, v);
-                    setState(() => _regularAddMode = v);
-                  },
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment<String>(
+                        value: 'auto',
+                        label: Text('Auto-add'),
+                        icon: Icon(Icons.flash_auto),
+                      ),
+                      ButtonSegment<String>(
+                        value: 'prompt',
+                        label: Text('Ask each time'),
+                        icon: Icon(Icons.help_outline),
+                      ),
+                    ],
+                    selected: {localAddMode},
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith((states) {
+                        final cs = Theme.of(context).colorScheme;
+                        return states.contains(WidgetState.selected)
+                            ? cs.primary
+                            : cs.surfaceContainerHighest;
+                      }),
+                      foregroundColor: WidgetStateProperty.resolveWith((states) {
+                        final cs = Theme.of(context).colorScheme;
+                        return states.contains(WidgetState.selected)
+                            ? cs.onPrimary
+                            : cs.onSurface;
+                      }),
+                      textStyle: WidgetStateProperty.resolveWith((states) {
+                        return TextStyle(
+                          fontWeight: states.contains(WidgetState.selected)
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        );
+                      }),
+                      elevation: WidgetStateProperty.resolveWith((states) {
+                        return states.contains(WidgetState.selected) ? 2.0 : 0.0;
+                      }),
+                      side: WidgetStateProperty.resolveWith((states) {
+                        final cs = Theme.of(context).colorScheme;
+                        final color = states.contains(WidgetState.selected) ? cs.primary : cs.outline;
+                        final width = states.contains(WidgetState.selected) ? 2.0 : 1.2;
+                        return BorderSide(color: color, width: width);
+                      }),
+                      overlayColor: WidgetStateProperty.resolveWith((states) {
+                        final cs = Theme.of(context).colorScheme;
+                        if (states.contains(WidgetState.pressed)) {
+                          return cs.primary.withValues(alpha: 0.12);
+                        }
+                        if (states.contains(WidgetState.hovered)) {
+                          return cs.primary.withValues(alpha: 0.08);
+                        }
+                        return null;
+                      }),
+                    ),
+                    onSelectionChanged: (selection) async {
+                      final v = selection.firstOrNull ?? localAddMode;
+                      setLocal(() => localAddMode = v);
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString(_kRegularAddModeKey, v);
+                      setState(() => _regularAddMode = v);
+                    },
+                  ),
                 ),
                 const Divider(),
                 // Only if empty
@@ -1487,9 +1927,11 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 Wrap(
                   spacing: 6,
                   runSpacing: -8,
-                  children: _regularExclude.map((e) => InputChip(
-                        label: Text(e),
-                        onDeleted: () async {
+      children: _regularExclude.map((e) => InputChip(
+        label: Text(e, style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        side: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1.0),
+        onDeleted: () async {
                           final newSet = {..._regularExclude}..remove(e);
                           final prefs = await SharedPreferences.getInstance();
                           await prefs.setStringList(_kRegularExcludeKey, newSet.toList());
@@ -1821,56 +2263,76 @@ class AllergyInfoScreen extends StatelessWidget {
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...reaction.reactions.map((r) => Text('• $r', style: const TextStyle(fontSize: 14))),
+                  ...reaction.reactions.map((r) => Text('\u2022 $r', style: const TextStyle(fontSize: 14))),
                   if (link != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8.0),
-                      child: GestureDetector(
-                        onTap: () async {
-                          final uri = Uri.parse(link);
-
-                          // List of common Android browser package names
-                          const browsers = [
-                            'app.vanadium.browser', // Vanadium (GrapheneOS)
-                            'com.android.chrome',   // Chrome
-                            'org.mozilla.firefox',  // Firefox
-                            'com.opera.browser',    // Opera
-                            'com.brave.browser',    // Brave
-                            'com.microsoft.emmx',   // Edge
-                          ];
-
-                          bool launched = false;
-                          for (final pkg in browsers) {
-                            final intent = AndroidIntent(
-                              action: 'action_view',
-                              data: uri.toString(),
-                              package: pkg,
-                            );
-                            try {
-                              await intent.launch();
-                              launched = true;
-                              break;
-                            } catch (_) {}
-                          }
-                          // Fallback to default browser if none of the above worked
-                          if (!launched) {
-                            if (await canLaunchUrl(uri)) {
-                              await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Could not open link.')),
-                              );
-                            }
-                          }
-                        },
-                        child: Text(
-                          'Learn more',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            decoration: TextDecoration.underline,
-                            fontSize: 14,
+                      child: Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () async {
+                              final uri = Uri.parse(link);
+                              // List of common Android browser package names
+                              const browsers = [
+                                'app.vanadium.browser', // Vanadium (GrapheneOS)
+                                'com.android.chrome',   // Chrome
+                                'org.mozilla.firefox',  // Firefox
+                                'com.opera.browser',    // Opera
+                                'com.brave.browser',    // Brave
+                                'com.microsoft.emmx',   // Edge
+                              ];
+                              bool launched = false;
+                              for (final pkg in browsers) {
+                                final intent = AndroidIntent(
+                                  action: 'action_view',
+                                  data: uri.toString(),
+                                  package: pkg,
+                                );
+                                try {
+                                  await intent.launch();
+                                  launched = true;
+                                  break;
+                                } catch (_) {}
+                              }
+                              if (!launched) {
+                                if (await canLaunchUrl(uri)) {
+                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Could not open link.')),
+                                  );
+                                }
+                              }
+                            },
+                            child: Text(
+                              'Learn more',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                                decoration: TextDecoration.underline,
+                                fontSize: 14,
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 16),
+                          GestureDetector(
+                            onTap: () async {
+                              // Open OFF search for this allergen term
+                              final q = Uri.encodeComponent(reaction.food);
+                              final uri = Uri.parse('https://world.openfoodfacts.org/cgi/search.pl?search_terms=$q&search_simple=1');
+                              try {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              } catch (_) {}
+                            },
+                            child: Text(
+                              'Search OFF',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                                decoration: TextDecoration.underline,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],
@@ -1879,6 +2341,110 @@ class AllergyInfoScreen extends StatelessWidget {
           );
         },
       ),
+      bottomNavigationBar: kAdsEnabled ? const SizedBox(height: 52, child: AdBanner()) : null,
+    );
+  }
+}
+
+class AdBanner extends StatefulWidget {
+  const AdBanner({super.key});
+  @override
+  State<AdBanner> createState() => _AdBannerState();
+}
+
+class _AdBannerState extends State<AdBanner> {
+  gma.BannerAd? _ad;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (kAdsEnabled) {
+      _ad = gma.BannerAd(
+        size: gma.AdSize.banner,
+        adUnitId: kBannerAdUnitId,
+        listener: gma.BannerAdListener(
+          onAdLoaded: (ad) => setState(() => _loaded = true),
+          onAdFailedToLoad: (ad, error) {
+            ad.dispose();
+            setState(() => _loaded = false);
+          },
+        ),
+        request: const gma.AdRequest(),
+      )..load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!kAdsEnabled || !_loaded || _ad == null) return const SizedBox.shrink();
+    return gma.AdWidget(ad: _ad!);
+  }
+}
+
+// Per-profile user allergy items management
+class UserAllergyListScreen extends StatefulWidget {
+  const UserAllergyListScreen({super.key});
+
+  @override
+  State<UserAllergyListScreen> createState() => _UserAllergyListScreenState();
+}
+
+class _UserAllergyListScreenState extends State<UserAllergyListScreen> {
+  List<String> _items = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    // Access parent state via closest GroceryListScreen state
+    final state = context.findAncestorStateOfType<_GroceryListScreenState>();
+    if (state == null) return;
+    final items = await state._getUserAllergyList();
+    setState(() => _items = items);
+  }
+
+  Future<void> _remove(String key) async {
+    final state = context.findAncestorStateOfType<_GroceryListScreenState>();
+    if (state == null) return;
+    await state._removeUserAllergyPreference(key);
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Removed from allergy list')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('My allergy items')),
+      body: _items.isEmpty
+          ? const Center(child: Text('No saved allergy items for this profile.'))
+          : ListView.builder(
+              itemCount: _items.length,
+              itemBuilder: (context, i) {
+                final name = _items[i];
+                return ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded),
+                  title: Text(name),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.redAccent),
+                    onPressed: () => _remove(name),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
@@ -1949,7 +2515,7 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+                       const Text(
               'Enter your ZIP code to find local food and assistance resources:',
               style: TextStyle(fontSize: 16),
             ),
@@ -2092,6 +2658,36 @@ class CreditsScreen extends StatelessWidget {
             subtitle: Text('Developed by WoofahRayetCode'),
           ),
           const Divider(),
+          ListTile(
+            leading: const Icon(Icons.public),
+            title: const Text('Open Food Facts'),
+            subtitle: const Text('Product data for food (CC-BY-SA). openfoodfacts.org'),
+            onTap: () async {
+              final uri = Uri.parse('https://world.openfoodfacts.org/');
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.public),
+            title: const Text('Open Beauty Facts'),
+            subtitle: const Text('Product data for cosmetics/personal care (ODbL/CC-BY-SA). openbeautyfacts.org'),
+            onTap: () async {
+              final uri = Uri.parse('https://world.openbeautyfacts.org/');
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8.0),
+            child: Text(
+              'This app uses public, community-maintained datasets. Trademarks and data belong to their respective owners.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          const Divider(),
           const ListTile(
             leading: Icon(Icons.code),
             title: Text('Open source'),
@@ -2129,6 +2725,18 @@ class CreditsScreen extends StatelessWidget {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => const PersonThanksScreen(name: 'Darh_JarJar'),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('Pam'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PersonThanksScreen(name: 'Pam'),
                 ),
               );
             },
@@ -2260,11 +2868,16 @@ class _UpdateScreenState extends State<UpdateScreen> {
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              icon: const Icon(Icons.download),
-              label: const Text('Force Download & Install APK'),
+              icon: const Icon(Icons.open_in_browser),
+              label: const Text('Open APK in browser'),
               onPressed: (_loading || _apkUrl == null)
                   ? null
-                  : () => downloadAndInstallApk(context, _apkUrl!),
+                  : () async {
+                      final uri = Uri.parse(_apkUrl!);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    },
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
@@ -2359,32 +2972,117 @@ Future<void> checkForTimeBasedUpdate(BuildContext context) async {
   }
 }
 
-Future<void> downloadAndInstallApk(BuildContext context, String apkUrl) async {
-  try {
-    final dir = await getExternalStorageDirectory();
-    if (dir == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not access storage.')),
+// In-app APK download/install removed to reduce security flags and VT false positives.
+
+Future<void> _showProductDetails(BuildContext context, ScannedProduct product) async {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (context) {
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(product.name ?? 'Product', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              if ((product.imageUrl ?? '').isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(product.imageUrl!, height: 180, fit: BoxFit.cover),
+                ),
+              ],
+              if ((product.brand ?? '').isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('Brand: ${product.brand}'),
+              ],
+              if ((product.nutriScore ?? '').isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('Nutri-Score: ${product.nutriScore!.toUpperCase()}'),
+              ],
+              if ((product.usageHint ?? '').isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('Use: ${product.usageHint}', style: const TextStyle(fontWeight: FontWeight.w500)),
+              ],
+              if (product.babyCautions.isNotEmpty || product.maternityCautions.isNotEmpty || product.babyRecommendations.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('Advisories', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: -8,
+                  children: [
+                    ...product.babyCautions.map((c) => Chip(
+                      label: Text(c),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                      labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSecondaryContainer),
+                      side: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 1.0),
+                    )),
+                    ...product.maternityCautions.map((c) => Chip(
+                      label: Text(c),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+                      labelStyle: TextStyle(color: Theme.of(context).colorScheme.onTertiaryContainer),
+                      side: BorderSide(color: Theme.of(context).colorScheme.tertiary, width: 1.0),
+                    )),
+                    ...product.babyRecommendations.map((c) => Chip(
+                      label: Text(c),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      side: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1.0),
+                    )),
+                  ],
+                ),
+              ],
+              if ((product.ingredientsText ?? '').isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('Ingredients', style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(product.ingredientsText!),
+              ],
+              if (product.nutriments.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('Nutriments (per 100g)', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: -8,
+                  children: [
+                    _nutriChip(context, product.nutriments, 'energy-kcal_100g', 'kcal'),
+                    _nutriChip(context, product.nutriments, 'fat_100g', 'g fat'),
+                    _nutriChip(context, product.nutriments, 'sugars_100g', 'g sugars'),
+                    _nutriChip(context, product.nutriments, 'salt_100g', 'g salt'),
+                    _nutriChip(context, product.nutriments, 'proteins_100g', 'g protein'),
+                  ].where((w) => w != null).cast<Widget>().toList(),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        ),
       );
-      return;
-    }
-    final filePath = '${dir.path}/update.apk';
+    },
+  );
+}
 
-    // Show downloading indicator
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Downloading update...')),
-    );
-
-    // Download the APK
-    final response = await http.get(Uri.parse(apkUrl));
-    final file = File(filePath);
-    await file.writeAsBytes(response.bodyBytes);
-
-    // Prompt install using apk_installer
-    await ApkInstaller.installApk(filePath: filePath);
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed to download or install APK: $e')),
-    );
-  }
+Widget? _nutriChip(BuildContext context, Map<String, dynamic> n, String key, String label) {
+  final v = n[key];
+  if (v == null) return null;
+  final num? value = v is num ? v : num.tryParse(v.toString());
+  if (value == null) return null;
+  final cs = Theme.of(context).colorScheme;
+  return Chip(
+    label: Text('${value.toStringAsFixed(1)} $label', style: TextStyle(color: cs.onSurface)),
+    backgroundColor: cs.surfaceContainerHighest,
+    side: BorderSide(color: cs.outline, width: 1.0),
+    visualDensity: VisualDensity.compact,
+  );
 }
