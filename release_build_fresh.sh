@@ -47,7 +47,139 @@ else
 fi
 export ANDROID_SDK_ROOT="$SDK_ROOT"
 export ANDROID_HOME="$SDK_ROOT"
+# If SDK dir doesn't exist, try to infer from adb or common system path
+if [[ ! -d "$ANDROID_SDK_ROOT" ]]; then
+  if command -v adb >/dev/null 2>&1; then
+    ADB_BIN="$(command -v adb)"
+    ADB_DIR="$(dirname "$ADB_BIN")"
+    if [[ "$(basename "$ADB_DIR")" == "platform-tools" ]]; then
+      CAND_ROOT="$(dirname "$ADB_DIR")"
+      if [[ -d "$CAND_ROOT" ]]; then
+        export ANDROID_SDK_ROOT="$CAND_ROOT"
+        export ANDROID_HOME="$CAND_ROOT"
+      fi
+    fi
+  fi
+  if [[ ! -d "$ANDROID_SDK_ROOT" && -d "/opt/android-sdk" ]]; then
+    export ANDROID_SDK_ROOT="/opt/android-sdk"
+    export ANDROID_HOME="/opt/android-sdk"
+  fi
+fi
 echo "==> Using Android SDK: $ANDROID_SDK_ROOT"
+# Define required NDK version to match AGP
+REQUIRED_NDK="ndk;27.0.12077973"
+
+# Download Android cmdline-tools into a given SDK if sdkmanager is missing
+ensure_cmdline_tools() {
+  local TARGET_SDK="$1"
+  local CT_DIR="$TARGET_SDK/cmdline-tools/latest"
+  if [[ -x "$CT_DIR/bin/sdkmanager" ]]; then
+    return 0
+  fi
+  echo "==> Installing Android cmdline-tools into $TARGET_SDK"
+  mkdir -p "$TARGET_SDK/cmdline-tools"
+  local ZIP_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+  local TMP_ZIP
+  TMP_ZIP="$(mktemp -t cmdline-tools-XXXXXX.zip)"
+  if command -v curl >/dev/null 2>&1; then
+    curl -L --fail -o "$TMP_ZIP" "$ZIP_URL" || { echo "ERROR: Failed to download cmdline-tools"; return 1; }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$TMP_ZIP" "$ZIP_URL" || { echo "ERROR: Failed to download cmdline-tools"; return 1; }
+  else
+    echo "ERROR: Neither curl nor wget found; cannot download cmdline-tools"
+    return 1
+  fi
+  local TMP_DIR
+  TMP_DIR="$(mktemp -d -t cmdline-tools-XXXXXX)"
+  unzip -q "$TMP_ZIP" -d "$TMP_DIR" || { echo "ERROR: unzip failed"; rm -f "$TMP_ZIP"; return 1; }
+  mkdir -p "$CT_DIR"
+  if [[ -d "$TMP_DIR/cmdline-tools" ]]; then
+    cp -a "$TMP_DIR/cmdline-tools/." "$CT_DIR/" || true
+  else
+    cp -a "$TMP_DIR/." "$CT_DIR/" || true
+  fi
+  rm -rf "$TMP_ZIP" "$TMP_DIR" || true
+}
+
+# If SDK root isn't writable (system SDK), bootstrap a user SDK under $HOME/Android/Sdk
+ensure_user_sdk() {
+  local USER SDKM_BIN
+  USER="$HOME/Android/Sdk"
+  # Find an sdkmanager we can use
+  if [[ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
+    SDKM_BIN="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+  elif [[ -x "/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager" ]]; then
+    SDKM_BIN="/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager"
+  elif command -v sdkmanager >/dev/null 2>&1; then
+    SDKM_BIN="$(command -v sdkmanager)"
+  else
+    SDKM_BIN=""
+  fi
+  if [[ ! -w "$ANDROID_SDK_ROOT" || "$ANDROID_SDK_ROOT" == "/opt/android-sdk" ]]; then
+    echo "==> System SDK not writable; preparing user SDK at $USER"
+    mkdir -p "$USER"
+    if [[ -z "$SDKM_BIN" ]]; then
+      ensure_cmdline_tools "$USER" || true
+      if [[ -x "$USER/cmdline-tools/latest/bin/sdkmanager" ]]; then
+        SDKM_BIN="$USER/cmdline-tools/latest/bin/sdkmanager"
+      fi
+    fi
+    if [[ -n "$SDKM_BIN" ]]; then
+      echo "==> Installing minimal Android SDK components into $USER"
+      "$SDKM_BIN" --sdk_root="$USER" --install "platform-tools" || true
+      "$SDKM_BIN" --sdk_root="$USER" --install "platforms;android-36" || true
+      "$SDKM_BIN" --sdk_root="$USER" --install "build-tools;36.0.0" || true
+      "$SDKM_BIN" --sdk_root="$USER" --install "$REQUIRED_NDK" || true
+      yes | "$SDKM_BIN" --sdk_root="$USER" --licenses || true
+      export ANDROID_SDK_ROOT="$USER"
+      export ANDROID_HOME="$USER"
+      echo "==> Switched to user SDK: $ANDROID_SDK_ROOT"
+    else
+      echo "WARN: sdkmanager not found; attempted to download cmdline-tools but still unavailable."
+      echo "      Please install Android Studio or 'cmdline-tools' manually and re-run."
+    fi
+  fi
+}
+
+ensure_user_sdk
+# Configure Flutter to use this Android SDK
+echo "==> Configuring Flutter Android SDK"
+"$FLUTTER_BIN" config --android-sdk "$ANDROID_SDK_ROOT" || true
+
+# Try to accept Android SDK licenses
+if [[ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
+  echo "==> Accepting Android SDK licenses"
+  yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || true
+else
+  if command -v sdkmanager >/dev/null 2>&1; then
+    echo "==> Accepting Android SDK licenses (system sdkmanager)"
+    yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || true
+  fi
+fi
+
+# Ensure android/local.properties has sdk.dir set for Gradle
+if [[ -n "$ANDROID_SDK_ROOT" ]]; then
+  echo "==> Writing android/local.properties sdk.dir=$ANDROID_SDK_ROOT"
+  {
+    echo "flutter.sdk=$HOME/.cache/flutter_sdk";
+    echo "sdk.dir=$ANDROID_SDK_ROOT";
+  } > "$SCRIPT_DIR/android/local.properties"
+fi
+
+# Ensure platform-tools (adb) in PATH
+if [[ -d "$ANDROID_SDK_ROOT/platform-tools" ]]; then
+  export PATH="$ANDROID_SDK_ROOT/platform-tools:$PATH"
+fi
+
+# Attempt wireless connect; allow override via GG_WIRELESS, default to 192.168.0.244:33647
+DEFAULT_WIRELESS="192.168.0.244:33647"
+WIRELESS_TARGET="${GG_WIRELESS:-$DEFAULT_WIRELESS}"
+if command -v adb >/dev/null 2>&1; then
+  echo "==> Attempting adb connect to $WIRELESS_TARGET"
+  adb connect "$WIRELESS_TARGET" || true
+else
+  echo "WARN: adb not found in PATH; skipping wireless connect"
+fi
 
 # Ensure a supported Java for Gradle/AGP (17 preferred, 21 acceptable)
 detect_supported_java() {
@@ -115,6 +247,28 @@ echo "==> flutter clean"
 echo "==> flutter pub get"
 "$FLUTTER_BIN" pub get
 
+# Ensure required components exist for the active SDK and accept licenses
+ensure_components_for_sdk() {
+  local ROOT="$1"
+  local SDKM_BIN="$ROOT/cmdline-tools/latest/bin/sdkmanager"
+  if [[ ! -x "$SDKM_BIN" ]]; then
+    ensure_cmdline_tools "$ROOT" || true
+  fi
+  if [[ -x "$SDKM_BIN" ]]; then
+    echo "==> Ensuring required Android components in $ROOT"
+    "$SDKM_BIN" --sdk_root="$ROOT" --install "platform-tools" || true
+    "$SDKM_BIN" --sdk_root="$ROOT" --install "platforms;android-36" || true
+    "$SDKM_BIN" --sdk_root="$ROOT" --install "build-tools;36.0.0" || true
+    "$SDKM_BIN" --sdk_root="$ROOT" --install "$REQUIRED_NDK" || true
+    yes | "$SDKM_BIN" --sdk_root="$ROOT" --licenses >/dev/null || true
+  fi
+}
+
+case "$ANDROID_SDK_ROOT" in
+  "$HOME"/*) ensure_components_for_sdk "$ANDROID_SDK_ROOT" ;;
+  *) : ;;
+esac
+
 # Preflight: ensure Android SDK cmdline-tools (sdkmanager) are available for license acceptance and components
 SDKMANAGER_BIN=""
 if [[ -n "$ANDROID_SDK_ROOT" && -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
@@ -136,28 +290,67 @@ if [[ -z "$SDKMANAGER_BIN" ]]; then
   echo ""
 fi
 
-echo "==> Building release APK"
-"$FLUTTER_BIN" build apk --release
+echo "==> Building release APKs (flavors)"
+# Build both flavors; ignore failures individually so the second can still succeed
+"$FLUTTER_BIN" build apk --release --flavor oss || true
+"$FLUTTER_BIN" build apk --release --flavor play || true
 
-APK_PATH="app-release.apk"
-if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+# Prefer OSS APK, then Play, then generic if present
+APK_PATH=""
+if [[ -f "build/app/outputs/flutter-apk/app-oss-release.apk" ]]; then
+  APK_PATH="build/app/outputs/flutter-apk/app-oss-release.apk"
+elif [[ -f "build/app/outputs/flutter-apk/app-play-release.apk" ]]; then
+  APK_PATH="build/app/outputs/flutter-apk/app-play-release.apk"
+elif [[ -f "build/app/outputs/flutter-apk/app-release.apk" ]]; then
   APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
 fi
 
-echo "==> Checking for connected devices"
-DEVICES_OUTPUT="$("$FLUTTER_BIN" devices || true)"
-if echo "$DEVICES_OUTPUT" | grep -qiE "wireless"; then
-  echo "==> Wireless device detected — installing APK"
-  "$FLUTTER_BIN" install -v || true
-  echo "==> Done."
+echo "==> Checking for connected Android devices (USB or wireless)"
+
+# Prefer explicit device id via GG_DEVICE_ID if provided
+SELECTED_DEVICE="${GG_DEVICE_ID:-}"
+
+if [[ -z "$SELECTED_DEVICE" ]] && command -v adb >/dev/null 2>&1; then
+  ADB_DEVICE=$(adb devices -l 2>/dev/null | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/ {print $1; exit}')
+  if [[ -n "$ADB_DEVICE" ]]; then
+    SELECTED_DEVICE="$ADB_DEVICE"
+  fi
+fi
+
+if [[ -z "$SELECTED_DEVICE" ]]; then
+  FD_OUT="$("$FLUTTER_BIN" devices 2>/dev/null || true)"
+  SELECTED_DEVICE=$(echo "$FD_OUT" | awk '/(android|wireless)/ && $1!="" {print $1; exit}')
+fi
+
+if [[ -n "$SELECTED_DEVICE" && -n "$APK_PATH" ]]; then
+  echo "==> Installing to Android device with Flutter: $SELECTED_DEVICE"
+  # Prefer adb direct install for explicit APK
+  if command -v adb >/dev/null 2>&1; then
+    if adb -s "$SELECTED_DEVICE" install -r "$APK_PATH"; then
+      echo "==> Done."
+      exit 0
+    fi
+  fi
+  # Fallback to Gradle flavor-specific install
+  if [[ "$APK_PATH" == *oss* ]]; then
+    ( cd android && ./gradlew installOssRelease -x lint ) && { echo "==> App installed via Gradle (oss)."; exit 0; }
+  elif [[ "$APK_PATH" == *play* ]]; then
+    ( cd android && ./gradlew installPlayRelease -x lint ) && { echo "==> App installed via Gradle (play)."; exit 0; }
+  fi
+  # Last resort, let Flutter try generic install
+  if "$FLUTTER_BIN" install -d "$SELECTED_DEVICE" -v; then
+    echo "==> Done."
+    exit 0
+  fi
+  echo "WARN: flutter install failed or device not recognized by Flutter. Attempting Gradle install..."
+  ( cd android && ./gradlew installRelease -x lint ) || { echo "ERROR: Gradle installRelease failed."; exit 1; }
+  echo "==> App installed via Gradle (generic)."
   exit 0
 fi
 
-if echo "$DEVICES_OUTPUT" | grep -qiE "usb|android"; then
-  echo "==> USB/Android device detected — installing APK"
-  "$FLUTTER_BIN" install -v || true
-  echo "==> Done."
-  exit 0
+if [[ -n "$APK_PATH" ]]; then
+  echo "==> No Android device detected. APK built at: $APK_PATH"
+else
+  echo "ERROR: APK not found under build/app/outputs/flutter-apk."
+  exit 1
 fi
-
-echo "==> No Android device detected. APK built at: $APK_PATH"
