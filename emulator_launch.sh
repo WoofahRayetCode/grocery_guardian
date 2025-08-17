@@ -5,6 +5,7 @@ set -euo pipefail
 # - Detects Android SDK path
 # - Lists AVDs, optionally creates a default AVD
 # - Launches selected AVD
+# - Optional: quick ADB wireless connect via --connect ip:port
 #
 # Usage:
 #   ./emulator_launch.sh                 # launch first available AVD
@@ -12,6 +13,7 @@ set -euo pipefail
 #   ./emulator_launch.sh <AVD_NAME>      # launch by name
 #   ./emulator_launch.sh --create        # create default Pixel_API_35 (API 35, google_apis, x86_64)
 #   ./emulator_launch.sh --create --name MyAVD --image "system-images;android-35;google_apis;x86_64" --device pixel_7
+#   ./emulator_launch.sh --connect 192.168.1.50:5555   # adb connect before launching
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -82,6 +84,8 @@ while [[ $# -gt 0 ]]; do
       IMAGE="${2:-}"; shift 2 ;;
     --device)
       DEVICE="${2:-}"; shift 2 ;;
+    --connect)
+      CONNECT_TO="${2:-}"; shift 2 ;;
     --sdk-root)
       CLI_SDK_ROOT="${2:-}"; shift 2 ;;
     --)
@@ -93,6 +97,15 @@ while [[ $# -gt 0 ]]; do
       NAME="$1"; shift ;;
   esac
 done
+# If requested, attempt adb wireless connect first
+if [[ -n "${CONNECT_TO:-}" ]]; then
+  if command -v adb >/dev/null 2>&1; then
+    echo "==> adb connect $CONNECT_TO"
+    adb connect "$CONNECT_TO" || true
+  else
+    echo "WARN: adb not found; cannot connect to $CONNECT_TO"
+  fi
+fi
 
 # Apply explicit --sdk-root override if provided
 if [[ -n "$CLI_SDK_ROOT" ]]; then
