@@ -21,6 +21,8 @@ build/
 .metadata
 .flutter-plugins
 .flutter-plugins-dependencies
+# Generated native assets (FFI, etc.)
+native_assets/
 # Note: For Flutter apps (not packages), commit pubspec.lock for reproducible builds.
 # If this repo is an app (it is), do NOT ignore pubspec.lock.
 
@@ -44,6 +46,12 @@ android/.kotlin/
 .gradle/
 *.apk
 *.aab
+# Local machine-specific config
+android/local.properties
+# Firebase/Google services (do not commit secrets)
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+macos/Runner/GoogleService-Info.plist
 
 # Extra safety for credentials/keystores anywhere in the repo
 **/*.keystore
