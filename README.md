@@ -66,6 +66,22 @@ Grocery Guardian is a Flutter app that helps you scan products, spot allergens, 
 - Release builds: versionName is the compile date (YYYY.MM.DD) and versionCode is YYYYMMDD.
 - Debug builds: versionName includes the exact compile time in UTC (YYYY.MM.DD HH:mm:ss UTC); versionCode is YYYYMMDD.
 
+## Release uploads (optional)
+
+The script `release_build_fresh.sh` can upload the built APK to Google Drive and overwrite any existing file with the same name in the target folder. By default it uses the Drive folder ID configured below and looks for an `rclone` remote named `gdrive`.
+
+Configure via environment variables:
+
+- `GG_DRIVE_FOLDER_ID` — Google Drive folder ID to upload into (default is the provided project folder)
+- `GG_RCLONE_REMOTE` — rclone remote name for Google Drive (default: `gdrive`)
+- `GG_UPLOAD_ENABLED` — set to `0` to skip uploading
+
+Dependencies (pick one):
+
+- `rclone` (recommended) with a remote configured for Google Drive, or
+- `gdrive` CLI (legacy)
+
+The helper script lives at `tools/upload_to_gdrive.sh` and is invoked automatically after builds.
 Notes:
 - The version code must monotonically increase for Play Store updates; a new build on a later date will naturally increment it.
 - The base pubspec `version:` is ignored for Android versioning by the Gradle variant logic.
