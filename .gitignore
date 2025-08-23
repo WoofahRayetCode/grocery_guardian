@@ -50,12 +50,25 @@ android/.kotlin/
 android/local.properties
 # Firebase/Google services (do not commit secrets)
 android/app/google-services.json
+# Also catch flavor-specific locations (e.g., src/play, src/oss)
+android/**/google-services.json
 ios/Runner/GoogleService-Info.plist
 macos/Runner/GoogleService-Info.plist
+# Firebase iOS/macOS app id files
+ios/**/firebase_app_id_file.json
+macos/**/firebase_app_id_file.json
 
 # Extra safety for credentials/keystores anywhere in the repo
 **/*.keystore
 **/*.jks
+# Apple signing artifacts
+**/*.p12
+**/*.p8
+**/*.mobileprovision
+**/*.provisionprofile
+
+# Flutter-generated env export helper
+**/flutter_export_environment.sh
 key.properties
 
 # Optional/Editor/OS/Temp files
