@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+		<!-- Reuse common launcher assets to avoid duplicate play-specific resources -->
+		<background android:drawable="@mipmap/ic_launcher"/>
+		<foreground android:drawable="@mipmap/ic_launcher"/>
+		<!-- Optional monochrome: reuse foreground -->
+		<monochrome android:drawable="@mipmap/ic_launcher"/>
+	</adaptive-icon>
