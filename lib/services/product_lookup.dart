@@ -453,7 +453,7 @@ class OpenBeautyFactsService {
   }
 
   static String? _inferUsageHint(String? name, List<String> categoriesTags) {
-    final hay = ((name ?? '') + ' ' + categoriesTags.join(' ')).toLowerCase();
+    final hay = ('${name ?? ''} ${categoriesTags.join(' ')}').toLowerCase();
     const rinseOff = [
       'shampoo', 'shower', 'body-wash', 'body_wash', 'gel-douche', 'gel_douche', 'cleanser',
       'soap', 'face-wash', 'face_wash', 'toothpaste', 'rinse-off', 'mouthwash', 'conditioner',
@@ -493,7 +493,7 @@ class OpenBeautyFactsService {
   }
 
   static List<String> _inferBeautyBabyCautions(String? name, List<String> categoriesTags, String? ingredientsText) {
-    final hay = ((name ?? '') + ' ' + categoriesTags.join(' ') + ' ' + (ingredientsText ?? '')).toLowerCase();
+    final hay = ('${name ?? ''} ${categoriesTags.join(' ')} ${ingredientsText ?? ''}').toLowerCase();
     final List<String> cautions = [];
     final isBabyTargeted = hay.contains('baby') || hay.contains('infant') || hay.contains('newborn');
     // If baby-targeted product includes fragrance/essential oils, caution
