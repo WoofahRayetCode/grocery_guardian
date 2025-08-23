@@ -315,5 +315,65 @@ if [[ -n "$SELECTED_DEVICE" ]]; then
   exit 0
 fi
 
-echo "==> No Android device detected — running on Linux desktop (hint: set GG_WIRELESS=ip:port to auto-connect)"
+echo "==> No physical/wireless Android device detected — attempting to launch Android emulator"
+
+# Try to start an emulator in the background (auto-create default if missing)
+AVD_NAME="${GG_AVD_NAME:-Pixel_API_35}"
+if [[ -x "$SCRIPT_DIR/emulator_launch.sh" ]]; then
+  nohup "$SCRIPT_DIR/emulator_launch.sh" --create --name "$AVD_NAME" >/dev/null 2>&1 &
+  EMU_STARTED=1
+else
+  echo "INFO: emulator_launch.sh not found; attempting to start first available AVD via emulator binary"
+  EMULATOR_BIN="$ANDROID_SDK_ROOT/emulator/emulator"
+  if [[ -x "$EMULATOR_BIN" ]]; then
+    FIRST_AVD=$("$EMULATOR_BIN" -list-avds | head -n1 || true)
+    if [[ -n "$FIRST_AVD" ]]; then
+      nohup "$EMULATOR_BIN" -avd "$FIRST_AVD" -netdelay none -netspeed full -no-snapshot >/dev/null 2>&1 &
+      EMU_STARTED=1
+    else
+      EMU_STARTED=0
+    fi
+  else
+    EMU_STARTED=0
+  fi
+fi
+
+if [[ "${EMU_STARTED:-0}" -eq 1 ]]; then
+  echo "==> Waiting for Android emulator to boot (timeout ~180s)"
+  # Give adb a moment to register emulator
+  sleep 2
+  BOOTED=""
+  EMU_ID=""
+  for i in {1..180}; do
+    # Find an emulator in 'device' state
+    EMU_ID=$(adb devices | awk '/^emulator-/{ if ($2=="device") {print $1; exit} }') || true
+    if [[ -n "$EMU_ID" ]]; then
+      # Check boot complete property
+      if [[ "$(adb -s "$EMU_ID" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
+        BOOTED=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+  if [[ -n "$BOOTED" && -n "$EMU_ID" ]]; then
+    echo "==> Emulator ready: $EMU_ID — running Flutter app"
+    if "$FLUTTER_BIN" run -d "$EMU_ID" --flavor "$FLAVOR"; then
+      exit 0
+    fi
+    echo "WARN: flutter run failed on emulator; trying Gradle install"
+    ( cd android && ./gradlew install${GRADLE_FLAVOR_CAPITALIZED}Debug -x lint ) || {
+      echo "ERROR: Gradle installDebug failed."; exit 1;
+    }
+    adb shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+    echo "==> App installed and launched on emulator via adb."
+    exit 0
+  else
+    echo "WARN: Emulator did not become ready in time."
+  fi
+else
+  echo "INFO: Could not start emulator automatically."
+fi
+
+echo "==> Falling back to Linux desktop run (hint: set GG_WIRELESS=ip:port to auto-connect Android)"
 "$FLUTTER_BIN" run -d linux
