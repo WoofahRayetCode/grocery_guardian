@@ -38,14 +38,30 @@ Grocery Guardian is a Flutter app that helps you scan products, spot allergens, 
 
 ### Linux helper scripts
 
-- Debug (fresh clean + run on device if present, else Linux desktop):
+- Debug (fresh clean + run on device if present; else auto-launch Android emulator; else Linux desktop):
   ```sh
   bash ./debug_build_fresh.sh
   ```
-- Release (fresh clean + build APK + install if device present):
+- Release (fresh clean + build APK + install if device present; else auto-launch Android emulator; always uploads if enabled):
   ```sh
   bash ./release_build_fresh.sh
   ```
+
+Notes:
+- If no physical/wireless Android device is detected, the scripts try to start an emulator automatically using `emulator_launch.sh` (or the SDK emulator binary) and wait up to ~5 minutes for it to boot.
+- Set `GG_AVD_NAME` to choose a specific AVD (default: `Pixel_API_35`). To list AVDs: `./emulator_launch.sh --list`.
+- Ensure the Android SDK emulator component is installed. On Arch/CachyOS you can install `android-sdk-emulator` and `android-sdk-platform-tools`.
+
+Setup a default Android emulator (AVD):
+```sh
+bash ./tools/setup_default_avd.sh              # creates Pixel_API_35 using android-35 google_apis x86_64
+bash ./tools/setup_default_avd.sh --list       # list existing AVDs
+bash ./tools/setup_default_avd.sh --name MyAVD # customize name
+```
+If the script isn’t executable, make it so:
+```sh
+chmod +x ./tools/setup_default_avd.sh
+```
 
 ### Play Store build
 
