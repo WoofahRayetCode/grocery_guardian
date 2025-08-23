@@ -182,19 +182,19 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   Future<bool> _hasPromptedExistingAllergy(String normalizedKey) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = 'allergy_prompted::'+_encodeProfileKey(_currentProfile)+'::'+normalizedKey;
+    final key = 'allergy_prompted::${_encodeProfileKey(_currentProfile)}::$normalizedKey';
     return prefs.getBool(key) ?? false;
   }
 
   Future<void> _setPromptedExistingAllergy(String normalizedKey) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = 'allergy_prompted::'+_encodeProfileKey(_currentProfile)+'::'+normalizedKey;
+    final key = 'allergy_prompted::${_encodeProfileKey(_currentProfile)}::$normalizedKey';
     await prefs.setBool(key, true);
   }
 
   Future<void> _addUserAllergyPreference(String normalizedKey) async {
     final prefs = await SharedPreferences.getInstance();
-    final listKey = 'user_allergy_items::'+_encodeProfileKey(_currentProfile);
+    final listKey = 'user_allergy_items::${_encodeProfileKey(_currentProfile)}';
     final current = prefs.getStringList(listKey) ?? <String>[];
     if (!current.contains(normalizedKey)) {
       current.add(normalizedKey);
@@ -204,13 +204,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   Future<List<String>> _getUserAllergyList() async {
     final prefs = await SharedPreferences.getInstance();
-    final listKey = 'user_allergy_items::'+_encodeProfileKey(_currentProfile);
+    final listKey = 'user_allergy_items::${_encodeProfileKey(_currentProfile)}';
     return prefs.getStringList(listKey) ?? <String>[];
   }
 
   Future<void> _removeUserAllergyPreference(String normalizedKey) async {
     final prefs = await SharedPreferences.getInstance();
-    final listKey = 'user_allergy_items::'+_encodeProfileKey(_currentProfile);
+    final listKey = 'user_allergy_items::${_encodeProfileKey(_currentProfile)}';
     final current = prefs.getStringList(listKey) ?? <String>[];
     current.removeWhere((e) => e == normalizedKey);
     await prefs.setStringList(listKey, current);
