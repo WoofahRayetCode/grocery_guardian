@@ -13,6 +13,7 @@ import 'package:package_info_plus/package_info_plus.dart'; // Add this import at
 // import 'dart:io';
 import 'screens/scan_product_screen.dart';
 import 'services/product_lookup.dart';
+import 'services/recall_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart' as gma;
 
 // Compile-time feature flags for store-specific builds
@@ -92,6 +93,7 @@ class _MainAppState extends State<MainApp> {
   '/credits': (context) => const CreditsScreen(),
         '/scan': (context) => const ScanProductScreen(),
   '/allergyList': (context) => const UserAllergyListScreen(),
+  '/recalls': (context) => const RecallManagementScreen(),
       },
     );
   }
@@ -231,6 +233,87 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     final name = _itemController.text.trim();
     final tag = _tagController.text.trim();
     final price = _parsePrice(_priceController.text);
+
+    if (name.isEmpty) return;
+
+    // CHECK FOR RECALLS FIRST (before any other processing)
+    final recallMatch = await RecallService.checkProduct(productName: name);
+    if (recallMatch != null) {
+      // Product is recalled - show warning and block
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Theme.of(context).colorScheme.error, size: 28),
+              const SizedBox(width: 8),
+              const Text('RECALL WARNING'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'This product is part of an active recall:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text('Product: ${recallMatch.productName}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                if (recallMatch.brand != null) Text('Brand: ${recallMatch.brand}'),
+                const SizedBox(height: 8),
+                if (recallMatch.reason != null) ...[
+                  const Text('Reason:', style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text(recallMatch.reason!, style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 8),
+                ],
+                if (recallMatch.datePublished != null)
+                  Text('Recall Date: ${recallMatch.datePublished}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '⚠️ This item cannot be added to your shopping list until confirmed safe.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await RecallService.markRecallSafe(recallMatch.id);
+                Navigator.pop(context);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Recall marked as safe. You can now add this item.')),
+                  );
+                }
+              },
+              child: const Text('Mark as Safe', style: TextStyle(color: Colors.orange)),
+            ),
+          ],
+        ),
+      );
+      return; // Block adding the item
+    }
 
     // One-time prompt for known allergen-prone items (food or non-food)
     final normalized = _normalizeItemKey(name);
@@ -922,6 +1005,91 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 final displayName = result.name?.isNotEmpty == true
                     ? result.name!
                     : 'Item ${result.barcode}';
+                
+                // CHECK FOR RECALLS FIRST
+                final recallMatch = await RecallService.checkProduct(
+                  barcode: result.barcode,
+                  productName: displayName,
+                );
+                
+                if (recallMatch != null) {
+                  // Product is recalled - show warning and block adding
+                  final shouldProceed = await showDialog<bool>(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => AlertDialog(
+                      title: Row(
+                        children: [
+                          Icon(Icons.warning, color: Theme.of(context).colorScheme.error, size: 28),
+                          const SizedBox(width: 8),
+                          const Text('RECALL WARNING'),
+                        ],
+                      ),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'This product is part of an active recall:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text('Product: ${recallMatch.productName}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                            if (recallMatch.brand != null) Text('Brand: ${recallMatch.brand}'),
+                            const SizedBox(height: 8),
+                            if (recallMatch.reason != null) ...[
+                              const Text('Reason:', style: TextStyle(fontWeight: FontWeight.w600)),
+                              Text(recallMatch.reason!, style: const TextStyle(color: Colors.red)),
+                              const SizedBox(height: 8),
+                            ],
+                            if (recallMatch.datePublished != null)
+                              Text('Recall Date: ${recallMatch.datePublished}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.errorContainer,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '⚠️ This item cannot be added to your shopping list until confirmed safe.',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onErrorContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Close'),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            await RecallService.markRecallSafe(recallMatch.id);
+                            Navigator.pop(context, true);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Recall marked as safe. You can now add this item.')),
+                              );
+                            }
+                          },
+                          child: const Text('Mark as Safe', style: TextStyle(color: Colors.orange)),
+                        ),
+                      ],
+                    ),
+                  );
+                  
+                  if (shouldProceed != true) return; // Blocked - don't show product dialog
+                }
+                
                 final knownReactions = FoodReactionDatabase.getReactionsForFood(displayName);
                 final offAllergens = result.allergens.map((e) => e.toLowerCase()).toSet();
                 final commonAllergens = <String>['Milk','Eggs','Peanuts','Tree nuts','Wheat','Soy','Fish','Shellfish','Sesame'];
@@ -1224,6 +1392,16 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                       child: const ListTile(
                         leading: Icon(Icons.warning_amber_rounded),
                         title: Text('My allergy items'),
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/recalls');
+                      },
+                      child: const ListTile(
+                        leading: Icon(Icons.report_problem),
+                        title: Text('Recalled Products'),
                       ),
                     ),
                   ],
@@ -3085,4 +3263,294 @@ Widget? _nutriChip(BuildContext context, Map<String, dynamic> n, String key, Str
     side: BorderSide(color: cs.outline, width: 1.0),
     visualDensity: VisualDensity.compact,
   );
+}
+
+// Recall Management Screen
+class RecallManagementScreen extends StatefulWidget {
+  const RecallManagementScreen({super.key});
+
+  @override
+  State<RecallManagementScreen> createState() => _RecallManagementScreenState();
+}
+
+class _RecallManagementScreenState extends State<RecallManagementScreen> {
+  List<RecallItem> _recalls = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecalls();
+  }
+
+  Future<void> _loadRecalls() async {
+    setState(() => _loading = true);
+    final recalls = await RecallService.loadRecalledProducts();
+    if (!mounted) return;
+    setState(() {
+      _recalls = recalls;
+      _loading = false;
+    });
+  }
+
+  Future<void> _refreshFromAPI() async {
+    setState(() => _loading = true);
+    await RecallService.refreshRecallData();
+    await _loadRecalls();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Recall data refreshed from FDA')),
+    );
+  }
+
+  Future<void> _markAsSafe(RecallItem item) async {
+    await RecallService.markRecallSafe(item.id);
+    await _loadRecalls();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${item.productName} marked as safe')),
+    );
+  }
+
+  Future<void> _addManualRecall() async {
+    final nameController = TextEditingController();
+    final brandController = TextEditingController();
+    final reasonController = TextEditingController();
+    final barcodeController = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Recalled Product'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Product Name *',
+                  hintText: 'e.g., XYZ Brand Peanut Butter',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: brandController,
+                decoration: const InputDecoration(
+                  labelText: 'Brand',
+                  hintText: 'Optional',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: reasonController,
+                decoration: const InputDecoration(
+                  labelText: 'Reason for Recall',
+                  hintText: 'e.g., Salmonella contamination',
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: barcodeController,
+                decoration: const InputDecoration(
+                  labelText: 'Barcode (optional)',
+                  hintText: 'If known',
+                ),
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Product name is required')),
+                );
+                return;
+              }
+              final brand = brandController.text.trim();
+              final reason = reasonController.text.trim();
+              final barcode = barcodeController.text.trim();
+              
+              await RecallService.addManualRecall(
+                productName: name,
+                brand: brand.isNotEmpty ? brand : null,
+                reason: reason.isNotEmpty ? reason : null,
+                barcodes: barcode.isNotEmpty ? [barcode] : null,
+              );
+              
+              Navigator.pop(context);
+              await _loadRecalls();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Added $name to recall list')),
+                );
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Recalled Products'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh from FDA',
+            onPressed: _refreshFromAPI,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'Add manual recall',
+            onPressed: _addManualRecall,
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'clear') {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Clear All Recalls?'),
+                    content: const Text('This will remove all recalled products from your list. Continue?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Clear All', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await RecallService.clearAllRecalls();
+                  await _loadRecalls();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('All recalls cleared')),
+                    );
+                  }
+                }
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'clear',
+                child: ListTile(
+                  leading: Icon(Icons.delete_forever, color: Colors.red),
+                  title: Text('Clear all recalls'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _recalls.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.check_circle_outline, size: 64, color: Colors.green[300]),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No recalled products',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Products you scan will be checked against your recall list. Add items manually or refresh from FDA.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _refreshFromAPI,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Check FDA for Recalls'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(8),
+                  itemCount: _recalls.length,
+                  itemBuilder: (context, index) {
+                    final recall = _recalls[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      child: ExpansionTile(
+                        leading: Icon(Icons.warning, color: Theme.of(context).colorScheme.error),
+                        title: Text(
+                          recall.productName,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: recall.brand != null ? Text(recall.brand!) : null,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (recall.reason != null) ...[
+                                  const Text('Reason:', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(recall.reason!, style: const TextStyle(color: Colors.red)),
+                                  const SizedBox(height: 8),
+                                ],
+                                if (recall.datePublished != null) ...[
+                                  Text('Recall Date: ${recall.datePublished}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                  const SizedBox(height: 8),
+                                ],
+                                if (recall.affectedBarcodes.isNotEmpty) ...[
+                                  const Text('Affected Barcodes:', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(recall.affectedBarcodes.join(', ')),
+                                  const SizedBox(height: 8),
+                                ],
+                                if (recall.description != null && recall.description!.isNotEmpty) ...[
+                                  const Text('Description:', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(recall.description!),
+                                  const SizedBox(height: 8),
+                                ],
+                                Text('Added: ${recall.addedAt.toString().split('.')[0]}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                const SizedBox(height: 12),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    TextButton.icon(
+                                      onPressed: () => _markAsSafe(recall),
+                                      icon: const Icon(Icons.check_circle, color: Colors.green),
+                                      label: const Text('Mark as Safe', style: TextStyle(color: Colors.green)),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
 }
