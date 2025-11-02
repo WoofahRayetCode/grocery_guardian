@@ -17,6 +17,8 @@ dependencies:
   path_provider: ^2.1.2
   google_mobile_ads: ^6.0.0
   mobile_scanner: ^6.0.2
+  flutter_secure_storage: ^9.2.2
+  flutter_jailbreak_detection: ^1.10.0
 
 dev_dependencies:
   flutter_test:
