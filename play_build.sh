@@ -38,10 +38,12 @@ fi
 
 if [[ "$BUILD_TARGET" == "appbundle" ]]; then
   echo "==> Building Play Store AAB (ads on, donations off)"
-  "$FLUTTER_BIN" build appbundle --flavor "$FLAVOR" --release "${DEFINES[@]}"
+  "$FLUTTER_BIN" build appbundle --flavor "$FLAVOR" --release "${DEFINES[@]}" \
+    --obfuscate --split-debug-info=build/symbols
   echo "==> Output: build/app/outputs/bundle/release/app-release.aab"
 else
   echo "==> Building Play Store APK (ads on, donations off)"
-  "$FLUTTER_BIN" build apk --flavor "$FLAVOR" --release "${DEFINES[@]}"
+  "$FLUTTER_BIN" build apk --flavor "$FLAVOR" --release "${DEFINES[@]}" \
+    --obfuscate --split-debug-info=build/symbols
   echo "==> Output: build/app/outputs/flutter-apk/app-release.apk"
 fi
