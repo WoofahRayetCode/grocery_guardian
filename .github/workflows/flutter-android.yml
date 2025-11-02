@@ -30,11 +30,11 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build APK (OSS flavor)
+        run: flutter build apk --release --flavor oss
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release.apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: app-oss-release.apk
+          path: build/app/outputs/flutter-apk/app-oss-release.apk
