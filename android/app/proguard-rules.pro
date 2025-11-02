@@ -12,6 +12,10 @@
 -keep class io.flutter.embedding.** { *; }
 -keep class io.flutter.view.** { *; }
 
+# Play Core (optional dynamic delivery; suppress warnings if not present)
+-dontwarn com.google.android.play.core.**
+-keep class com.google.android.play.core.** { *; }
+
 # Retain annotations
 -keepattributes *Annotation*
 
