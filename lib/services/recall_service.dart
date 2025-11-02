@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'http_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Represents a food recall item from FDA/USDA or similar sources
@@ -69,7 +69,7 @@ class RecallService {
     try {
       // Example API call structure (adjust query params as needed)
       final uri = Uri.parse('$_fdaRecallsUrl?limit=100');
-      final resp = await http.get(uri, headers: {
+      final resp = await SecureHttp.instance.get(uri, headers: {
         'User-Agent': 'GroceryGuardian/0.1 (+https://github.com/WoofahRayetCode/grocery_guardian)'
       }).timeout(const Duration(seconds: 10));
       
