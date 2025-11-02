@@ -1,17 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_jailbreak_detection/flutter_jailbreak_detection.dart';
 
 class DeviceSecurity {
   /// Returns true if the device appears rooted/jailbroken/emulated.
+  /// Note: Detection disabled - flutter_jailbreak_detection incompatible with current AGP.
+  /// Consider using: safe_device, flutter_jailbreak_checker, or freerasp when available.
   static Future<bool> isCompromised() async {
-    try {
-      final jailbroken = await FlutterJailbreakDetection.jailbroken;
-      final developerMode = await FlutterJailbreakDetection.developerMode;
-      return jailbroken || developerMode;
-    } catch (e) {
-      debugPrint('DeviceSecurity check failed: $e');
-      return false;
-    }
+    // TODO: Replace with compatible plugin when available
+    return false;
   }
 
   static Future<void> warnIfCompromised(BuildContext context) async {
@@ -27,4 +22,9 @@ class DeviceSecurity {
       );
     }
   }
+
+  // Alternative plugins to consider:
+  // - safe_device: ^1.1.4 (actively maintained)
+  // - flutter_jailbreak_checker: ^1.0.0
+  // - freerasp: commercial with free tier
 }
