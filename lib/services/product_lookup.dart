@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'http_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ScannedProduct {
@@ -84,7 +84,7 @@ class OpenFoodFactsService {
     if (cached != null) return cached;
     try {
       final uri = Uri.parse('$_base/$barcode.json');
-      final resp = await http.get(uri, headers: {
+      final resp = await SecureHttp.instance.get(uri, headers: {
         'User-Agent': 'GroceryGuardian/0.1 (+https://github.com/WoofahRayetCode/grocery_guardian)'
       });
       if (resp.statusCode != 200) return null;
@@ -127,7 +127,7 @@ class OpenFoodFactsService {
         ].join(','),
       };
       final uri = Uri.parse(_searchBase).replace(queryParameters: params);
-      final resp = await http.get(uri, headers: {
+      final resp = await SecureHttp.instance.get(uri, headers: {
         'User-Agent': 'GroceryGuardian/0.1 (+https://github.com/WoofahRayetCode/grocery_guardian)'
       });
       if (resp.statusCode != 200) return null;
@@ -349,7 +349,7 @@ class OpenBeautyFactsService {
     if (cached != null) return cached;
     try {
       final uri = Uri.parse('$_base/$barcode.json');
-      final resp = await http.get(uri, headers: {
+      final resp = await SecureHttp.instance.get(uri, headers: {
         'User-Agent': 'GroceryGuardian/0.1 (+https://github.com/WoofahRayetCode/grocery_guardian)'
       });
       if (resp.statusCode != 200) return null;
@@ -389,7 +389,7 @@ class OpenBeautyFactsService {
         ].join(','),
       };
       final uri = Uri.parse(_searchBase).replace(queryParameters: params);
-      final resp = await http.get(uri, headers: {
+      final resp = await SecureHttp.instance.get(uri, headers: {
         'User-Agent': 'GroceryGuardian/0.1 (+https://github.com/WoofahRayetCode/grocery_guardian)'
       });
       if (resp.statusCode != 200) return null;
