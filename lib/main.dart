@@ -1,7 +1,6 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
@@ -15,6 +14,10 @@ import 'screens/scan_product_screen.dart';
 import 'services/product_lookup.dart';
 import 'services/recall_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart' as gma;
+import 'services/secure_prefs.dart';
+import 'services/http_client.dart';
+import 'services/consent_manager.dart';
+import 'services/device_security.dart';
 
 // Compile-time feature flags for store-specific builds
 const bool kAdsEnabled = bool.fromEnvironment('ADS', defaultValue: false);
@@ -27,6 +30,7 @@ const String kBannerAdUnitId = String.fromEnvironment(
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kAdsEnabled) {
+    await ConsentManager.requestConsentAndShowIfRequired();
     await gma.MobileAds.instance.initialize();
   }
   runApp(const MainApp());
@@ -46,6 +50,10 @@ class _MainAppState extends State<MainApp> {
   void initState() {
     super.initState();
     _loadTheme();
+    // Warn users if device appears rooted/jailbroken
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      DeviceSecurity.warnIfCompromised(context);
+    });
   }
 
   Future<void> _loadTheme() async {
@@ -183,39 +191,29 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   String _normalizeItemKey(String s) => s.trim().toLowerCase();
 
   Future<bool> _hasPromptedExistingAllergy(String normalizedKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = 'allergy_prompted::${_encodeProfileKey(_currentProfile)}::$normalizedKey';
-    return prefs.getBool(key) ?? false;
+    return SecurePrefs.getAllergyPrompted(_currentProfile, normalizedKey);
   }
 
   Future<void> _setPromptedExistingAllergy(String normalizedKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = 'allergy_prompted::${_encodeProfileKey(_currentProfile)}::$normalizedKey';
-    await prefs.setBool(key, true);
+    await SecurePrefs.setAllergyPrompted(_currentProfile, normalizedKey, true);
   }
 
   Future<void> _addUserAllergyPreference(String normalizedKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    final listKey = 'user_allergy_items::${_encodeProfileKey(_currentProfile)}';
-    final current = prefs.getStringList(listKey) ?? <String>[];
+    final current = await SecurePrefs.getAllergyList(_currentProfile);
     if (!current.contains(normalizedKey)) {
       current.add(normalizedKey);
-      await prefs.setStringList(listKey, current);
+      await SecurePrefs.setAllergyList(_currentProfile, current);
     }
   }
 
   Future<List<String>> _getUserAllergyList() async {
-    final prefs = await SharedPreferences.getInstance();
-    final listKey = 'user_allergy_items::${_encodeProfileKey(_currentProfile)}';
-    return prefs.getStringList(listKey) ?? <String>[];
+    return SecurePrefs.getAllergyList(_currentProfile);
   }
 
   Future<void> _removeUserAllergyPreference(String normalizedKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    final listKey = 'user_allergy_items::${_encodeProfileKey(_currentProfile)}';
-    final current = prefs.getStringList(listKey) ?? <String>[];
+    final current = await SecurePrefs.getAllergyList(_currentProfile);
     current.removeWhere((e) => e == normalizedKey);
-    await prefs.setStringList(listKey, current);
+    await SecurePrefs.setAllergyList(_currentProfile, current);
   }
 
   bool _looksLikeCommonAllergenTerm(String normalizedName) {
@@ -849,13 +847,14 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('App Permissions & Privacy'),
+        title: const Text('Privacy & Permissions'),
         content: const Text(
-          'This app does not collect or share your personal data.\n\n'
+          'We respect your privacy. This app stores your preferences locally on your device.\n\n'
           'Permissions used:\n'
-          '- Internet: To open external links for allergy info and resources.\n'
-          '- No location, contacts, or storage access is requested.\n\n'
-          'We respect your privacy.',
+          '- Camera: Scan barcodes to look up products.\n'
+          '- Internet: Fetch product info, recalls, and open links.\n\n'
+          'Advertising (Play build only):\n'
+          'If ads are enabled, Google Mobile Ads may process device identifiers subject to your consent. You can manage consent from the app menu.',
         ),
         actions: [
           TextButton(
@@ -2289,7 +2288,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   Future<void> checkForGithubReleasesUpdate(BuildContext context) async {
   final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
   try {
-    final response = await http.get(Uri.parse(url));
+    final response = await SecureHttp.instance.get(Uri.parse(url));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       final tagName = data['tag_name'] ?? 'Unknown';
@@ -2992,7 +2991,7 @@ class _UpdateScreenState extends State<UpdateScreen> {
     });
     final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await SecureHttp.instance.get(Uri.parse(url));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
@@ -3098,7 +3097,7 @@ final DateTime appBuildDateTime = DateTime.parse(appBuildTime);
 
 Future<DateTime?> fetchLatestReleaseTime() async {
   final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
-  final response = await http.get(Uri.parse(url));
+  final response = await SecureHttp.instance.get(Uri.parse(url));
   if (response.statusCode == 200) {
     final data = jsonDecode(response.body);
     return DateTime.parse(data['published_at']);
