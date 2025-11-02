@@ -4,7 +4,10 @@
         android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="${appIconRef}"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:usesCleartextTraffic="false">
         <!-- Google Mobile Ads App ID (uses placeholder; test App ID by default) -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
@@ -55,8 +58,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Camera for barcode scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- Google Mobile Ads (Play flavor only effectively used) -->
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+    <!-- AD_ID declared in play flavor manifest only -->
 
     <!-- Declare camera as optional so app remains installable on devices without a camera -->
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
