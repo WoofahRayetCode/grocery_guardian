@@ -33,8 +33,34 @@ jobs:
       - name: Build APK (OSS flavor)
         run: flutter build apk --release --flavor oss
 
-      - name: Upload APK
+      - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-oss-release.apk
+          name: app-oss-release
           path: build/app/outputs/flutter-apk/app-oss-release.apk
+
+      - name: Get version from pubspec
+        id: version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Create Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
+          name: Release v${{ steps.version.outputs.version }} (Build ${{ github.run_number }})
+          body: |
+            Automated release from CI build #${{ github.run_number }}
+            
+            Commit: ${{ github.sha }}
+            
+            ## Download
+            - `app-oss-release.apk` - OSS flavor (no ads, donations enabled)
+          files: build/app/outputs/flutter-apk/app-oss-release.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
