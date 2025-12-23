@@ -18,6 +18,14 @@ class SecurePrefs {
     ),
   );
 
+  // Cached SharedPreferences instance for performance
+  static SharedPreferences? _prefsCache;
+  
+  /// Get cached SharedPreferences instance (avoids repeated async getInstance calls)
+  static Future<SharedPreferences> get _prefs async {
+    return _prefsCache ??= await SharedPreferences.getInstance();
+  }
+
   // App-specific keys we consider sensitive
     static String _allergyListKeyForProfile(String profile) =>
       'sec::user_allergy_items::${Uri.encodeComponent(profile)}';
@@ -26,7 +34,8 @@ class SecurePrefs {
 
   // Migration helpers
   static Future<void> _migrateIfNeeded({required String fromKey, required String toKey}) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs;
+
     final legacy = prefs.getStringList(fromKey);
     final legacyStr = prefs.getString(fromKey);
     // If secure already has a value, skip
