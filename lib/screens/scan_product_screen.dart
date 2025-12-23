@@ -12,6 +12,24 @@ class ScanProductScreen extends StatefulWidget {
 class _ScanProductScreenState extends State<ScanProductScreen> {
   bool _handled = false;
   bool _loading = false;
+  
+  // Controller for better lifecycle management and resource optimization
+  late final MobileScannerController _scannerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.normal, // Balance between speed and battery
+      detectionTimeoutMs: 500, // Avoid processing same barcode too quickly
+    );
+  }
+
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,6 +38,7 @@ class _ScanProductScreenState extends State<ScanProductScreen> {
       body: Stack(
         children: [
           MobileScanner(
+            controller: _scannerController,
             onDetect: (capture) async {
               if (_handled) return;
               final barcodes = capture.barcodes;
