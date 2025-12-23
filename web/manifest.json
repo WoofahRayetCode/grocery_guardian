@@ -1,12 +1,12 @@
 {
-    "name": "grocery_guardian",
-    "short_name": "grocery_guardian",
+    "name": "Grocery Guardian - Food Safety & Recalls",
+    "short_name": "Grocery Guardian",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#121212",
+    "theme_color": "#1f1f1f",
+    "description": "Check for food recalls, allergies, and manage your grocery list safely.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
