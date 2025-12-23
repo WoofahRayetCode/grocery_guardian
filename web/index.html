@@ -17,23 +17,82 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://api.github.com https://world.openfoodfacts.org https://world.openbeautyfacts.org https://api.fda.gov;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; connect-src 'self' https://api.github.com https://world.openfoodfacts.org https://world.openbeautyfacts.org https://api.fda.gov https: data:;">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Grocery Guardian - Check for food recalls, allergies, and manage your grocery list safely.">
+  <meta name="theme-color" content="#1f1f1f">
+
+  <!-- Open Graph tags for social sharing -->
+  <meta property="og:title" content="Grocery Guardian - Food Safety & Recalls">
+  <meta property="og:description" content="Check for food recalls, manage allergies, and track your grocery list with Grocery Guardian.">
+  <meta property="og:type" content="website">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="grocery_guardian">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Grocery Guardian">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>grocery_guardian</title>
+  <title>Grocery Guardian - Food Safety & Recalls</title>
   <link rel="manifest" href="manifest.json">
+  
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background-color: #121212;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    
+    app-root {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
 </head>
 <body>
+  <!-- Loading indicator -->
+  <div id="loading" style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; background-color: #121212; color: #fff; font-family: sans-serif;">
+    <div style="text-align: center;">
+      <h2>Loading Grocery Guardian...</h2>
+      <p>Please wait while the app initializes.</p>
+    </div>
+  </div>
+
+  <script>
+    // Configure Flutter to not use CDN
+    window.flutterWebConfiguration = {
+      canvasKitBaseUrl: '/canvaskit/',
+      canvasKitVariant: 'auto'
+    };
+    
+    // Add global error handler to catch initialization errors
+    window.addEventListener('error', function(event) {
+      console.error('Global error caught:', event.error);
+      document.getElementById('loading').innerHTML = '<div style="color: red; padding: 20px; text-align: center;"><h2>Error Loading App</h2><p>' + event.error.toString() + '</p></div>';
+    });
+    
+    window.addEventListener('unhandledrejection', function(event) {
+      console.error('Unhandled promise rejection:', event.reason);
+      document.getElementById('loading').innerHTML = '<div style="color: red; padding: 20px; text-align: center;"><h2>Error Loading App</h2><p>' + event.reason.toString() + '</p></div>';
+    });
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
