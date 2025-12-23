@@ -3,10 +3,14 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:android_intent_plus/android_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/foundation.dart'; // Add this import at the top if not present
-import 'package:package_info_plus/package_info_plus.dart'; // Add this import at the top
+import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+// Conditional platform imports
+import 'dart:io' show Platform;
+import 'package:android_intent_plus/android_intent.dart' show AndroidIntent;
+
 // import 'package:apk_installer/apk_installer.dart'; // removed: no in-app APK installs
 // import 'package:path_provider/path_provider.dart';
 // import 'dart:io';
@@ -27,8 +31,26 @@ const String kBannerAdUnitId = String.fromEnvironment(
   defaultValue: 'ca-app-pub-3940256099942544/6300978111', // Google test banner id
 );
 
+/// Cached SharedPreferences instance for app-wide performance optimization.
+/// Avoids repeated async getInstance() calls throughout the app.
+class PrefsCache {
+  static SharedPreferences? _instance;
+  
+  /// Get cached SharedPreferences instance (initializes on first call)
+  static Future<SharedPreferences> get instance async {
+    return _instance ??= await SharedPreferences.getInstance();
+  }
+  
+  /// Pre-initialize the cache during app startup
+  static Future<void> init() async {
+    _instance ??= await SharedPreferences.getInstance();
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Pre-cache SharedPreferences for faster subsequent access
+  await PrefsCache.init();
   if (kAdsEnabled) {
     await ConsentManager.requestConsentAndShowIfRequired();
     await gma.MobileAds.instance.initialize();
@@ -83,13 +105,36 @@ class _MainAppState extends State<MainApp> {
 
   @override
   Widget build(BuildContext context) {
-  // Build light/dark themes with Material 3
-  final ThemeData lightTheme = ThemeData.light(useMaterial3: true);
-  final ThemeData darkTheme = ThemeData.dark(useMaterial3: true);
+  // Build light/dark themes with Material 3 optimized for high-DPI screens
+  final ThemeData lightTheme = ThemeData.light(useMaterial3: true).copyWith(
+    visualDensity: VisualDensity.adaptivePlatformDensity,
+    textTheme: ThemeData.light().textTheme.apply(
+      fontSizeFactor: 1.0,
+      displayColor: Colors.black87,
+      bodyColor: Colors.black87,
+    ),
+  );
+  final ThemeData darkTheme = ThemeData.dark(useMaterial3: true).copyWith(
+    visualDensity: VisualDensity.adaptivePlatformDensity,
+    textTheme: ThemeData.dark().textTheme.apply(
+      fontSizeFactor: 1.0,
+      displayColor: Colors.white,
+      bodyColor: Colors.white,
+    ),
+  );
     return MaterialApp(
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: _themeMode,
+      builder: (context, child) {
+        // Constrain text scale factor for consistent UI on high-DPI devices
+        final mediaQueryData = MediaQuery.of(context);
+        final scaleFactor = mediaQueryData.textScaler.scale(1.0).clamp(0.8, 1.3);
+        return MediaQuery(
+          data: mediaQueryData.copyWith(textScaler: TextScaler.linear(scaleFactor)),
+          child: child!,
+        );
+      },
       home: GroceryListScreen(
         onThemeChanged: _setTheme,
         currentThemeMode: _themeMode,
@@ -666,11 +711,28 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   @override
   void initState() {
     super.initState();
-    _showPermissionsOnFirstLaunch();
-    _initProfiles();
-  _loadAutoLoadSetting();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _maybeAutoloadRegulars();
+    // Initialize async operations safely
+    Future.microtask(() async {
+      try {
+        await _showPermissionsOnFirstLaunch();
+      } catch (e) {
+        if (kDebugMode) debugPrint('Error showing permissions: $e');
+      }
+    });
+    Future.microtask(() async {
+      try {
+        await _loadAutoLoadSetting();
+      } catch (e) {
+        if (kDebugMode) debugPrint('Error loading auto load setting: $e');
+      }
+    });
+    Future.microtask(() async {
+      try {
+        await _initProfiles();
+        _maybeAutoloadRegulars();
+      } catch (e) {
+        if (kDebugMode) debugPrint('Error initializing profiles: $e');
+      }
     });
   }
 
@@ -1291,33 +1353,39 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                       onPressed: () async {
                         Navigator.pop(context);
                         final uri = Uri.parse('https://www.paypal.com/donate/?business=WZACHCSCA5SMS&no_recurring=0&currency_code=USD');
-                        const browsers = [
-                          'app.vanadium.browser',
-                          'com.android.chrome',
-                          'org.mozilla.firefox',
-                          'com.opera.browser',
-                          'com.brave.browser',
-                          'com.microsoft.emmx',
-                        ];
                         bool launched = false;
-                        for (final pkg in browsers) {
-                          final intent = AndroidIntent(
-                            action: 'action_view',
-                            data: uri.toString(),
-                            package: pkg,
-                          );
-                          try {
-                            await intent.launch();
-                            launched = true;
-                            break;
-                          } catch (_) {}
+                        
+                        // Try Android intents first (only on Android)
+                        if (Platform.isAndroid) {
+                          const browsers = [
+                            'app.vanadium.browser',
+                            'com.android.chrome',
+                            'org.mozilla.firefox',
+                            'com.opera.browser',
+                            'com.brave.browser',
+                            'com.microsoft.emmx',
+                          ];
+                          for (final pkg in browsers) {
+                            try {
+                              final intent = AndroidIntent(
+                                action: 'action_view',
+                                data: uri.toString(),
+                                package: pkg,
+                              );
+                              await intent.launch();
+                              launched = true;
+                              break;
+                            } catch (_) {}
+                          }
                         }
+                        
+                        // Fallback to url_launcher for web and other platforms
                         if (!launched) {
-                          if (!mounted) return; // <-- Add this line
+                          if (!mounted) return;
                           if (await canLaunchUrl(uri)) {
                             await launchUrl(uri, mode: LaunchMode.externalApplication);
                           } else {
-                            if (!mounted) return; // <-- Add this line
+                            if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Could not open PayPal link.')),
                             );
@@ -1415,31 +1483,35 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ),
         ],
       ),
-  body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _itemController,
-                    decoration: const InputDecoration(
-                      labelText: 'Food Item',
+  body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: MediaQuery.of(context).size.width > 600 ? 24.0 : 16.0,
+            vertical: 12.0,
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _itemController,
+                      decoration: const InputDecoration(
+                        labelText: 'Food Item',
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-          child: TextField(
-                    controller: _tagController,
-                    decoration: const InputDecoration(
-            labelText: 'Discomfort (optional)',
+                  const SizedBox(width: 8),
+                  Expanded(
+            child: TextField(
+                      controller: _tagController,
+                      decoration: const InputDecoration(
+              labelText: 'Discomfort (optional)',
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
+                  const SizedBox(width: 8),
+                  SizedBox(
                   width: 110,
                   child: TextField(
                     controller: _priceController,
@@ -1473,37 +1545,49 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             const SizedBox(height: 8),
             // Empty-state helper to load regulars quickly
             if (_mainItems.isEmpty && _taggedItems.isEmpty)
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerLowest,
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.history_toggle_off),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text('Regular items', style: TextStyle(fontWeight: FontWeight.w600)),
-                            SizedBox(height: 2),
-                            Text('Load items you buy frequently or adjust settings', style: TextStyle(fontSize: 12)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Card(
+                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.history_toggle_off, size: 20),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text('Regular items', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                            ),
                           ],
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: _showRegularItemsSettings,
-                        icon: const Icon(Icons.settings),
-                        label: const Text('Settings'),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: _loadRegularsNow,
-                        icon: const Icon(Icons.playlist_add),
-                        label: const Text('Load'),
-                      ),
-                    ],
+                        const SizedBox(height: 6),
+                        const Text('Load items you buy frequently or adjust settings', style: TextStyle(fontSize: 11)),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            Expanded(
+                              child: TextButton.icon(
+                                onPressed: _showRegularItemsSettings,
+                                icon: const Icon(Icons.settings, size: 18),
+                                label: const Text('Settings', style: TextStyle(fontSize: 12)),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _loadRegularsNow,
+                                icon: const Icon(Icons.playlist_add, size: 18),
+                                label: const Text('Load', style: TextStyle(fontSize: 12)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1740,6 +1824,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ],
         ),
       ),
+    ),
       // Add this floatingActionButton for the Completed button at the bottom right
       floatingActionButton: allChecked
           ? FloatingActionButton.extended(
@@ -1974,10 +2059,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 ),
                 const Divider(),
                 // Add mode
-                ListTile(
+                const ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Add mode'),
-                  subtitle: const Text('Choose how regulars are added'),
+                  title: Text('Add mode'),
+                  subtitle: Text('Choose how regulars are added'),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
@@ -2286,7 +2371,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   }
 
   Future<void> checkForGithubReleasesUpdate(BuildContext context) async {
-  final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
+  const url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
   try {
     final response = await SecureHttp.instance.get(Uri.parse(url));
     if (response.statusCode == 200) {
@@ -2449,34 +2534,39 @@ class AllergyInfoScreen extends StatelessWidget {
                           GestureDetector(
                             onTap: () async {
                               final uri = Uri.parse(link);
-                              // List of common Android browser package names
-                              const browsers = [
-                                'app.vanadium.browser', // Vanadium (GrapheneOS)
-                                'com.android.chrome',   // Chrome
-                                'org.mozilla.firefox',  // Firefox
-                                'com.opera.browser',    // Opera
-                                'com.brave.browser',    // Brave
-                                'com.microsoft.emmx',   // Edge
-                              ];
                               bool launched = false;
-                              for (final pkg in browsers) {
-                                final intent = AndroidIntent(
-                                  action: 'action_view',
-                                  data: uri.toString(),
-                                  package: pkg,
-                                );
-                                try {
-                                  await intent.launch();
-                                  launched = true;
-                                  break;
-                                } catch (_) {}
+                              
+                              // Try Android intents first (only on Android)
+                              if (Platform.isAndroid) {
+                                const browsers = [
+                                  'app.vanadium.browser', // Vanadium (GrapheneOS)
+                                  'com.android.chrome',   // Chrome
+                                  'org.mozilla.firefox',  // Firefox
+                                  'com.opera.browser',    // Opera
+                                  'com.brave.browser',    // Brave
+                                  'com.microsoft.emmx',   // Edge
+                                ];
+                                for (final pkg in browsers) {
+                                  try {
+                                    final intent = AndroidIntent(
+                                      action: 'action_view',
+                                      data: uri.toString(),
+                                      package: pkg,
+                                    );
+                                    await intent.launch();
+                                    launched = true;
+                                    break;
+                                  } catch (_) {}
+                                }
                               }
+                              
+                              // Fallback to url_launcher for web and other platforms
                               if (!launched) {
                                 if (await canLaunchUrl(uri)) {
                                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                                 } else {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Could not open link.')),
+                                    const SnackBar(content: Text('Could not open link.')),
                                   );
                                 }
                               }
@@ -2764,29 +2854,35 @@ class _LowIncomeResourcesScreenState extends State<LowIncomeResourcesScreen> {
   Future<void> _handleResourceTap(String url) async {
     if (url.startsWith('http')) {
       final uri = Uri.parse(url);
-      const browsers = [
-        'app.vanadium.browser',
-        'com.android.chrome',
-        'org.mozilla.firefox',
-        'com.opera.browser',
-        'com.brave.browser',
-        'com.microsoft.emmx',
-      ];
       bool launched = false;
-      for (final pkg in browsers) {
-        final intent = AndroidIntent(
-          action: 'action_view',
-          data: uri.toString(),
-          package: pkg,
-        );
-        try {
-          await intent.launch();
-          launched = true;
-          break;
-        } catch (e) {
-          if (kDebugMode) debugPrint('Browser launch error ($pkg): $e');
+      
+      // Try Android intents first (only on Android)
+      if (Platform.isAndroid) {
+        const browsers = [
+          'app.vanadium.browser',
+          'com.android.chrome',
+          'org.mozilla.firefox',
+          'com.opera.browser',
+          'com.brave.browser',
+          'com.microsoft.emmx',
+        ];
+        for (final pkg in browsers) {
+          try {
+            final intent = AndroidIntent(
+              action: 'action_view',
+              data: uri.toString(),
+              package: pkg,
+            );
+            await intent.launch();
+            launched = true;
+            break;
+          } catch (e) {
+            if (kDebugMode) debugPrint('Browser launch error ($pkg): $e');
+          }
         }
       }
+      
+      // Fallback to url_launcher for web and other platforms
       if (!launched) {
         try {
           if (await canLaunchUrl(uri)) {
@@ -2989,7 +3085,7 @@ class _UpdateScreenState extends State<UpdateScreen> {
       _releaseNotes = null;
       _apkUrl = null;
     });
-    final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
+    const url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
     try {
       final response = await SecureHttp.instance.get(Uri.parse(url));
       if (response.statusCode == 200) {
@@ -3096,7 +3192,7 @@ const String appBuildTime = '2024-06-23T12:00:00Z'; // Update this for each buil
 final DateTime appBuildDateTime = DateTime.parse(appBuildTime);
 
 Future<DateTime?> fetchLatestReleaseTime() async {
-  final url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
+  const url = 'https://api.github.com/repos/WoofahRayetCode/grocery_guardian/releases/latest';
   final response = await SecureHttp.instance.get(Uri.parse(url));
   if (response.statusCode == 200) {
     final data = jsonDecode(response.body);
@@ -3131,7 +3227,7 @@ Future<void> checkForTimeBasedUpdate(BuildContext context) async {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              final url = 'https://github.com/WoofahRayetCode/grocery_guardian/releases/latest';
+              const url = 'https://github.com/WoofahRayetCode/grocery_guardian/releases/latest';
               final uri = Uri.parse(url);
               if (await canLaunchUrl(uri)) {
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
