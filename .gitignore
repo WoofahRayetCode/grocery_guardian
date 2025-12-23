@@ -88,6 +88,9 @@ key.properties
 .fvm/
 .flutter-versions
 
+# Bundled Flutter SDK (use system Flutter instead)
+flutter/
+
 # Test coverage outputs
 coverage/
 lcov.info
